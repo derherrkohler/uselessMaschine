@@ -48,7 +48,7 @@ Stückliste zusätzlich zu Board, Servo, Batteriehalter und Schalter:
 
 | Teil | Wert | Wofür |
 |---|---|---|
-| D1 | **1N5819** (Schottky; gleichwertig 1N5817, SS14). **Keine** Silizium-Diode wie 1N4007/1N4148/1N5399/1N5408/FR107/FR207 | trennt die ESP-Versorgung vom Servo und schützt vor Rückspeisung in USB bzw. Batterie |
+| D1 | **1N5819** (Schottky; gleichwertig 1N5817, SS14). **Keine** Silizium-Diode wie 1N4007/1N4148/1N5399/1N5408/FR107/FR207 | trennt die ESP-Versorgung vom Servo und schützt vor Rückspeisung in USB bzw. Batterie. **Optional**, wenn USB nie gleichzeitig mit den Batterien angeschlossen ist (dann Batterie-Plus direkt an 5V, Hauptschalter vor der Aufteilung Servo/ESP) |
 | C1 | 470–1000 µF, **≥ 10 V**, Elko, low-ESR | Servo-Anlaufstrom abfangen |
 | C2, C4, C5 | 100 nF Keramik | hochfrequente Störungen |
 | C3 | 100–220 µF, ≥ 10 V | Stützpuffer für den ESP hinter der Diode |
