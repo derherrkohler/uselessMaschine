@@ -30,16 +30,16 @@ Das Ganze passiert jedes Mal ein bisschen anders: mal zögerlich, mal hektisch, 
                                                                                 Servo GND (braun/schwarz),
                                                                                 Schalter, C1−, C3−
 
- ESP32 GPIO4 ───[R1 330 Ω]───────────────► Servo Signal (orange/gelb)
+ Servo-GPIO ───[R1 330 Ω]────────────────► Servo Signal (orange/gelb)     S3: GPIO 5 · C3: GPIO 4
       │
       └──[R2 10 kΩ]── GND        (Pull-down: Servo zuckt nicht beim Einschalten)
 
- ESP32 3V3 ───[R3 10 kΩ]───┬─────────────► ESP32 GPIO5
+ ESP32 3V3 ───[R3 10 kΩ]───┬─────────────► Schalter-GPIO                  S3: GPIO 4 · C3: GPIO 5
                            │
                            ├── Kippschalter: äußerer Pin ─┐
                            │                 mittlerer Pin (COM) ── GND
                            │                 anderer äußerer Pin: frei
-                           │                               (Schalter "AN" = GPIO5 auf GND)
+                           │                               (Schalter "AN" = Schalter-GPIO auf GND)
                            │
                            └── C5 100 nF ── GND        (optional, Entprellung/Störschutz)
 ```
@@ -88,8 +88,8 @@ Alternativen für Servo oder Schalter: GPIO 0, 1, 3, 6, 7, 10.
 
 | Funktion | GPIO | Warum |
 |---|---|---|
-| Servo-Signal | **GPIO 4** | frei, kein Strapping |
-| Schalter | **GPIO 5** | frei, kein Strapping |
+| Servo-Signal | **GPIO 5** | frei, kein Strapping |
+| Schalter | **GPIO 4** | frei, kein Strapping |
 | Versorgung | **5V**-Pin (über D1), **G** | |
 
 Alternativen: GPIO 1, 2, 6–13.
@@ -152,7 +152,7 @@ Der ESP gibt 3,3-V-Pulse aus. Praktisch alle Hobby-Servos erkennen das zuverläs
 
 Ein Kippschalter mit 3 Pins ist ein Umschalter (SPDT). Der **mittlere Pin (COM)** ist je nach Hebelstellung mit dem linken oder rechten Pin verbunden.
 
-- **Mittlerer Pin → GND**, **ein äußerer Pin → GPIO5**, der andere äußere Pin bleibt frei.
+- **Mittlerer Pin → GND**, **ein äußerer Pin → Schalter-GPIO** (S3: GPIO 4, C3: GPIO 5), der andere äußere Pin bleibt frei.
 - Der Kontakt schließt auf der **gegenüberliegenden** Seite der Hebelstellung: Hebel nach links → COM mit dem **rechten** Pin verbunden.
 - Nimm den äußeren Pin, der verbunden ist, wenn der Hebel in der **„AN“-Stellung** steht (also der Stellung, aus der der Arm ihn zurückdrückt). Prüfen mit Multimeter (Durchgang) oder Befehl `s` im seriellen Monitor. Ist es falsch herum: einfach den anderen äußeren Pin nehmen.
 - **Wichtig:** Der Schalter muss **ON-ON** sein (2 Stellungen). Ein **ON-OFF-ON** mit Mittelstellung funktioniert nicht, weil der Arm den Hebel sonst nur in die Mitte drückt.

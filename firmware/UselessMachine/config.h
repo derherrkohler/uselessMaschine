@@ -14,8 +14,8 @@
   #define PIN_SERVO   4   // PWM zum Servo (über 330 Ω)
   #define PIN_SWITCH  5   // Kippschalter
 #elif CONFIG_IDF_TARGET_ESP32S3
-  #define PIN_SERVO   4
-  #define PIN_SWITCH  5
+  #define PIN_SERVO   5   // so verdrahtet: Servo-Signal an GPIO 5
+  #define PIN_SWITCH  4   // Schalter an GPIO 4
   #define PIN_RGB_LED 48  // WS2812 auf dem S3 SuperMini – wird dauerhaft ausgeschaltet.
                           // Zeile auskommentieren, falls dein Board dort keine LED hat.
 #else
