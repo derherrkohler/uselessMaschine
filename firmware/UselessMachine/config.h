@@ -79,7 +79,7 @@
 #define SPEED_LIMIT_PCT_S       0.0f
 
 #define MOTION_STEP_MS          15    // Interpolations-Takt
-#define SERVO_DETACH_IDLE_MS    600   // PWM abschalten, wenn Arm ruht (kein Brummen, weniger Strom)
+#define SERVO_DETACH_IDLE_MS   1500   // PWM abschalten, wenn Arm ruht (kein Brummen, weniger Strom)
 
 // ---------------------------------------------------------------------
 //  KLICK-LOGIK

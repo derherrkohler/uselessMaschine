@@ -205,7 +205,8 @@ static Outcome perform(const Plan& p, bool test) {
   bool ok = timedScript(ZURUECK[p.z], (test || failed) ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS);
   M.setGuard(Guard::None);
   M.testMode = false;
-  Serial.printf("  Dauer %lu ms\n", (unsigned long)(millis() - t0));
+  Serial.printf("  Dauer %lu ms | Ende: pos %.0f %% = %.0f µs (HOME %u)%s\n", (unsigned long)(millis() - t0), M.pos,
+                M.servo.us(), calib.home, ok ? "" : " | Rückzug abgebrochen: Schalter wieder AN");
   if (!ok) return Outcome::Retrigger;
   return failed ? Outcome::PushFailed : Outcome::Done;
 }
@@ -584,7 +585,7 @@ static void runCommand(char* cmd) {
       if (wasOn)
         Serial.println(M.pushFailed ? F("  -> Schalter NICHT umgelegt: PUSH weiter setzen oder PUSH_OVERDRIVE_US erhöhen")
                                     : F("  -> Schalter umgelegt"));
-      printUs();
+      goPos(0);
       break;
     }
     case 'g': if (needCalibrated()) goPos(constrain(arg, 0, 100)); break;
@@ -704,6 +705,8 @@ void loop() {
 
   // Ruhender Arm: PWM aus -> kein Brummen, weniger Strom
   if (M.servo.isAttached() && M.pos < 0.5f && millis() - M.lastMotion > SERVO_DETACH_IDLE_MS) {
+    M.servo.writeUs(Motion::posToUs(0));  // sicherheitshalber nochmal HOME, dann Pulse aus
+    delay(200);
     M.servo.detach();
   }
 
