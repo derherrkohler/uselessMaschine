@@ -92,7 +92,9 @@
 // Mehr Kraft: beim Drücken so viele µs ÜBER den PUSH-Punkt hinaus kommandieren.
 // Der Servo drückt proportional zur Abweichung. Wird bei jedem Versuch größer (1×, 2×, 3×).
 #define PUSH_OVERDRIVE_US  60
-#define PUSH_OVERDRIVE_MAX_US 200  // Obergrenze, damit der Arm nach dem Umkippen nicht anschlägt
+#define PUSH_FURTHER_US    40   // jeder weitere Versuch fährt so viele µs weiter über PUSH hinaus
+#define PUSH_OVERDRIVE_MAX_US 300  // Obergrenze für Weiterfahren + Übersteuern zusammen,
+                                   // damit der Arm nach dem Umkippen nicht anschlägt
 #define PUSH_WINDUP_POS    70   // Anlauf-Position (%) für den 2. und 3. Versuch (kleiner = mehr Schwung, dauert länger)
 #define PUSH_WINDUP_STEP   20   // jeder weitere Versuch holt so viel % weiter aus (70 %, dann 50 %)
 #define PUSH_WINDUP_PAUSE_MS 60 // kurze Pause am Anlaufpunkt, bevor erneut gedrückt wird

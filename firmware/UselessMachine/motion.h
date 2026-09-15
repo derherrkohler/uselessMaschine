@@ -271,18 +271,24 @@ class Motion {
           if (!moveTo(windup, 1e6f, E_LIN)) return false;
           if (!waitMs(PUSH_WINDUP_PAUSE_MS)) return false;
         }
-        // erster Versuch im Tempo der Geste, danach immer Vollgas
-        if (!moveTo(100, attempt ? 1e6f : v, attempt ? E_LIN : ease, 100)) return false;
+        // Erster Versuch im Tempo der Geste, danach immer Vollgas.
+        // Jeder weitere Versuch fährt PUSH_FURTHER_US weiter über PUSH hinaus.
+        const float usPerPct = fabs((float)calib.push - (float)calib.touch) / (100.0f - P_TOUCH);
+        float further = attempt * (float)PUSH_FURTHER_US;
+        if (further > PUSH_OVERDRIVE_MAX_US) further = PUSH_OVERDRIVE_MAX_US;
+        const float target = 100.0f + (usPerPct > 0.0f ? further / usPerPct : 0.0f);
+        if (!moveTo(target, attempt ? 1e6f : v, attempt ? E_LIN : ease, target)) return false;
+        // zusätzlich kurz übersteuern (mehr Kraft) – zusammen höchstens PUSH_OVERDRIVE_MAX_US
         float overdrive = PUSH_OVERDRIVE_US * (attempt + 1.0f);
-        if (overdrive > PUSH_OVERDRIVE_MAX_US) overdrive = PUSH_OVERDRIVE_MAX_US;
-        servo.writeUs(posToUs(100) + dir * overdrive);
+        if (further + overdrive > PUSH_OVERDRIVE_MAX_US) overdrive = PUSH_OVERDRIVE_MAX_US - further;
+        servo.writeUs(posToUs(target) + dir * overdrive);
         lastMotion = millis();
         uint32_t t0 = millis();
         while (millis() - t0 < PUSH_CONFIRM_MS && (sw.isOn() || testMode)) {
           if (!waitMs(5)) return false;
           if (testMode && millis() - t0 > 120) break;
         }
-        servo.writeUs(posToUs(100));
+        servo.writeUs(posToUs(target));
         if (!sw.isOn() || testMode) { ok = true; break; }
       }
     }
