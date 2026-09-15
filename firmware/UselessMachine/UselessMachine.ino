@@ -339,7 +339,8 @@ static void printHelp() {
       "  x        gespeicherte Kalibrierung löschen\n"
       "Nach dem Speichern:\n"
       "  c        Kalibriermodus an/aus (aus = Maschine reagiert auf den Schalter)\n"
-      "  h d t p  langsam zu HOME / DECKEL / TOUCH / PUSH\n"
+      "  h d t    langsam zu HOME / DECKEL / TOUCH\n"
+      "  p        echter Klick-Test mit Vollgas (Schalter vorher AN)\n"
       "  g42      langsam zu Position 42 %\n"
       "  r / n7   Testlauf zufällig / Persönlichkeit Nr. 7\n"
       "  l        Persönlichkeiten auflisten\n"
@@ -519,12 +520,24 @@ static void runCommand(char* cmd) {
     case 'h': if (needCalibrated()) goPos(0); break;
     case 'd': if (needCalibrated()) goPos(P_LID); break;
     case 't': if (needCalibrated()) goPos(P_TOUCH); break;
-    case 'p':
+    case 'p': {  // echter Klick-Test mit Vollgas und Übersteuern
       if (!needCalibrated()) break;
-      goPos(100);
-      delay(300);
       goPos(P_CLOSE);
+      M.sw.update();
+      bool wasOn = M.sw.isOn();
+      if (!wasOn) Serial.println(F("Schalter ist aus – nur Bewegungstest. Für den echten Test Schalter AN stellen."));
+      M.mood = MOODS[mNormal];
+      M.setGuard(Guard::None);
+      M.testMode = !wasOn;
+      M.pushFailed = false;
+      M.push(1e6f, E_LIN);
+      M.testMode = false;
+      if (wasOn)
+        Serial.println(M.pushFailed ? F("  -> Schalter NICHT umgelegt: PUSH weiter setzen oder PUSH_OVERDRIVE_US erhöhen")
+                                    : F("  -> Schalter umgelegt"));
+      printUs();
       break;
+    }
     case 'g': if (needCalibrated()) goPos(constrain(arg, 0, 100)); break;
     case 'r':
       if (!needCalibrated()) break;

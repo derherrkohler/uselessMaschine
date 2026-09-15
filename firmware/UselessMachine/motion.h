@@ -225,24 +225,30 @@ class Motion {
 
   // Schalter umlegen – mit Erfolgskontrolle und Wiederholung.
   // Danach wird immer vom Anschlag weggefahren (kein Blockieren = kein Stromspitzen-Dauerfeuer).
+  // Beim Drücken wird kurz über PUSH hinaus kommandiert (PUSH_OVERDRIVE_US): Der Servo
+  // drückt proportional zur Abweichung, also kräftiger. Weitere Versuche mit Anlauf.
   bool push(float v, uint8_t ease) {
     bool ok = false;
     if (!sw.isOn() && !testMode) {
       ok = true;  // schon aus (z. B. beim Heranfahren umgefallen)
     } else {
+      const float dir = calib.push >= calib.touch ? 1.0f : -1.0f;
       for (uint8_t attempt = 0; attempt <= PUSH_RETRIES; attempt++) {
+        if (attempt) {
+          Serial.printf("  [push] Schalter noch an – Versuch %u mit Anlauf\n", attempt + 1);
+          if (!moveTo(PUSH_WINDUP_POS, 1e6f, E_LIN)) return false;
+          if (!waitMs(200)) return false;
+        }
         if (!moveTo(100, attempt ? 1e6f : v, attempt ? E_LIN : ease, 100)) return false;
+        servo.writeUs(posToUs(100) + dir * PUSH_OVERDRIVE_US * (attempt + 1));
+        lastMotion = millis();
         uint32_t t0 = millis();
         while (millis() - t0 < PUSH_CONFIRM_MS && (sw.isOn() || testMode)) {
           if (!waitMs(5)) return false;
           if (testMode && millis() - t0 > 120) break;
         }
+        servo.writeUs(posToUs(100));
         if (!sw.isOn() || testMode) { ok = true; break; }
-        Serial.printf("  [push] Schalter noch an – Versuch %u\n", attempt + 2);
-        if (attempt < PUSH_RETRIES) {
-          if (!moveTo(P_CLOSE - 10, 1e6f, E_LIN)) return false;
-          if (!waitMs(150)) return false;
-        }
       }
     }
     if (!ok) pushFailed = true;

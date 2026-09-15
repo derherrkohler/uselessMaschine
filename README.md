@@ -334,7 +334,7 @@ Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 | ESP startet neu, sobald der Servo loslegt; Serial zeigt „BROWNOUT“ | Spannungseinbruch → D1 + C3 einbauen, C1 näher an den Servo, frische Batterien, kürzere/dickere Kabel. Notlösung: `SPEED_LIMIT_PCT_S` auf z. B. `200.0f`. **Den Brownout-Detektor nicht abschalten.** |
 | Servo zuckt beim Einschalten | normal kurz beim Anlegen der Spannung. R2 (10 kΩ Pull-down) hilft; der Code setzt den Pin sofort auf LOW und fährt direkt auf HOME. |
 | Servo brummt/zittert in Ruhe | Arm drückt gegen den Anschlag → HOME 2–3 Schritte davor neu setzen (`h`, `+`/`-`, `H`, `w`). Die Firmware schaltet die PWM in Ruhe ab. |
-| Schalter wird nicht umgelegt, Meldung „ließ sich nicht umlegen“ | PUSH etwas weiter setzen (`p`, `+`/`-`, `P`, `w`), Hebelarm kürzer, Servo zu schwach oder Batterie leer. Die Maschine wartet dann, bis du den Schalter selbst ausmachst (kein Dauer-Blockieren). |
+| Schalter wird nicht umgelegt, Meldung „ließ sich nicht umlegen“ | PUSH weiter setzen (z. B. `u1850`, `P`, `w`) oder `PUSH_OVERDRIVE_US` in `config.h` erhöhen, Hebelarm kürzer. Beim Test über USB ist der Servo schwächer als mit frischen Batterien, Servo zu schwach oder Batterie leer. Die Maschine wartet dann, bis du den Schalter selbst ausmachst (kein Dauer-Blockieren). |
 | Die Maschine hält den Schalter für schon aus | Schaltlogik andersherum → anderen äußeren Kontakt nehmen oder `SWITCH_ON_LEVEL` auf `HIGH` (dann Pull-down statt Pull-up). |
 | Schalter löst zufällig aus | Störungen durch Servokabel → R3 + C5, Leitungen verdrillen und getrennt verlegen. |
 | Upload klappt nicht, kein USB-Port sichtbar | **BOOT halten, RESET tippen (oder USB einstecken), BOOT loslassen**, dann flashen. |
