@@ -84,12 +84,14 @@
 // ---------------------------------------------------------------------
 //  KLICK-LOGIK
 // ---------------------------------------------------------------------
-#define PUSH_CONFIRM_MS   250   // so lange nach dem Drücken auf "Schalter aus" warten
+#define PUSH_CONFIRM_MS   150   // so lange nach dem Drücken auf "Schalter aus" warten (endet sofort, wenn er fällt)
 #define PUSH_RETRIES        2   // weitere Versuche, falls der Schalter nicht umgefallen ist
 // Mehr Kraft: beim Drücken so viele µs ÜBER den PUSH-Punkt hinaus kommandieren.
 // Der Servo drückt proportional zur Abweichung. Wird bei jedem Versuch größer (1×, 2×, 3×).
 #define PUSH_OVERDRIVE_US  60
-#define PUSH_WINDUP_POS    50   // Anlauf-Position (%) für den 2. und 3. Versuch
+#define PUSH_WINDUP_POS    70   // Anlauf-Position (%) für den 2. und 3. Versuch (kleiner = mehr Schwung, dauert länger)
+#define PUSH_WINDUP_STEP   20   // jeder weitere Versuch holt so viel % weiter aus (70 %, dann 50 %)
+#define PUSH_WINDUP_PAUSE_MS 60 // kurze Pause am Anlaufpunkt, bevor erneut gedrückt wird
 
 // ---------------------------------------------------------------------
 //  ZEITBUDGET – harte Obergrenzen je Aktion

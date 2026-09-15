@@ -258,8 +258,8 @@ class Motion {
       for (uint8_t attempt = 0; attempt <= PUSH_RETRIES; attempt++) {
         if (attempt) {
           Serial.printf("  [push] Schalter noch an – Versuch %u mit Anlauf\n", attempt + 1);
-          if (!moveTo(PUSH_WINDUP_POS, 1e6f, E_LIN)) return false;
-          if (!waitMs(200)) return false;
+          if (!moveTo(PUSH_WINDUP_POS - (attempt - 1) * PUSH_WINDUP_STEP, 1e6f, E_LIN)) return false;
+          if (!waitMs(PUSH_WINDUP_PAUSE_MS)) return false;
         }
         if (!moveTo(100, attempt ? 1e6f : v, attempt ? E_LIN : ease, 100)) return false;
         servo.writeUs(posToUs(100) + dir * PUSH_OVERDRIVE_US * (attempt + 1));
