@@ -323,6 +323,16 @@ Einzelne Punkte korrigieren: hinfahren (z. B. `t`), mit `+` / `-` (10 µs ≈ 1�
 
 Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
 
+### Länge der Vorstellungen
+
+Zwei globale Regler wirken auf alle Gesten, der Charakter bleibt dabei erhalten. Beide werden sofort im ESP gespeichert:
+
+- `v130`: **Tempo** aller Bewegungen in % (50–300). Vollgas-Bewegungen sind schon am Servo-Limit und bleiben gleich.
+- `k60`: **Länge aller Pausen** und Zitterphasen in % (10–200).
+- `v` oder `k` ohne Zahl zeigt die aktuellen Werte.
+
+Die Standardwerte stehen in `config.h` (`GLOBAL_TEMPO_PCT`, `GLOBAL_PAUSE_PCT`).
+
 Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 
 ---

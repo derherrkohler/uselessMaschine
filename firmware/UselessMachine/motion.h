@@ -111,6 +111,8 @@ class Motion {
   bool pushFailed = false;    // Schalter ließ sich nicht umlegen
   bool testMode = false;      // Testlauf ohne echten Schalter
   uint32_t lastMotion = 0;
+  uint16_t tempoPct = GLOBAL_TEMPO_PCT;  // globaler Tempo-Faktor
+  uint16_t pausePct = GLOBAL_PAUSE_PCT;  // globaler Pausen-Faktor
 
   void begin() {
     sw.begin();
@@ -148,7 +150,7 @@ class Motion {
   // Mood-skalierte Geschwindigkeit aus Skriptwert
   float speedOf(uint8_t s) const {
     if (s >= S_MAX) return 1e6f;
-    float v = s * mood.tempo / 100.0f * rndf(0.85f, 1.15f);
+    float v = s * mood.tempo / 100.0f * tempoPct / 100.0f * rndf(0.85f, 1.15f);
     return v < 3.0f ? 3.0f : v;
   }
 
@@ -292,7 +294,7 @@ class Motion {
           if (!wiggle(a[0], a[1], a[2])) return false;
           break;
         case OP_JITTER:
-          if (!jitter(a[0], a[1] * 20UL)) return false;
+          if (!jitter(a[0], a[1] * 20UL * pausePct / 100)) return false;
           break;
         case OP_LOOP: {
           uint8_t n = rndRange(a[0], a[1]);
@@ -332,7 +334,9 @@ class Motion {
     return lo + random(hi - lo + 1);
   }
   float sloppy(uint8_t p) const { return p + (int)random(-(int)mood.sloppy, (int)mood.sloppy + 1); }
-  uint32_t scaleWait(uint32_t ms) const { return (uint32_t)(ms * mood.patience / 100.0f * rndf(0.9f, 1.1f)); }
+  uint32_t scaleWait(uint32_t ms) const {
+    return (uint32_t)(ms * mood.patience / 100.0f * pausePct / 100.0f * rndf(0.9f, 1.1f));
+  }
 
   static float applyEase(float t, uint8_t e) {
     switch (e) {

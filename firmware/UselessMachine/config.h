@@ -95,6 +95,11 @@
 //  CHARAKTER
 // ---------------------------------------------------------------------
 #define PERSONA_CHANCE_PCT   70     // Rest: freie Zufallskombination ("Freestyle")
+
+// Gesamtlänge der Vorstellungen. Auch im seriellen Monitor änderbar ('v', 'k'),
+// dort gesetzte Werte werden gespeichert und haben Vorrang.
+#define GLOBAL_TEMPO_PCT    130     // alle Bewegungen schneller (100 = wie programmiert)
+#define GLOBAL_PAUSE_PCT     60     // alle Pausen und Zitterzeiten kürzer (100 = wie programmiert)
 #define ANNOY_WINDOW_MS      8000   // erneutes Einschalten innerhalb dieser Zeit nervt
 #define ANNOY_STEP           25
 #define ANNOY_RETRIGGER_STEP 35     // Schalter wieder an, während der Arm noch zurückfährt

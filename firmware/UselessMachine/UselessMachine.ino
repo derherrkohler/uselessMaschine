@@ -266,6 +266,23 @@ static bool saveCalib(const Calib& c) {
   return ok;
 }
 
+// Globales Tempo / Pausen: gespeicherte Werte haben Vorrang vor config.h
+static void loadTiming() {
+  Preferences prefs;
+  if (!prefs.begin(PREFS_NS, true)) return;
+  M.tempoPct = prefs.getUShort("tempo", GLOBAL_TEMPO_PCT);
+  M.pausePct = prefs.getUShort("pause", GLOBAL_PAUSE_PCT);
+  prefs.end();
+}
+
+static void saveTiming() {
+  Preferences prefs;
+  if (!prefs.begin(PREFS_NS, false)) return;
+  prefs.putUShort("tempo", M.tempoPct);
+  prefs.putUShort("pause", M.pausePct);
+  prefs.end();
+}
+
 static void clearCalib() {
   Preferences prefs;
   if (prefs.begin(PREFS_NS, false)) {
@@ -344,7 +361,10 @@ static void printHelp() {
       "  g42      langsam zu Position 42 %\n"
       "  r / n7   Testlauf zufällig / Persönlichkeit Nr. 7\n"
       "  l        Persönlichkeiten auflisten\n"
-      "  s        Status\n"));
+      "  s        Status\n"
+      "Länge der Vorstellungen (wird sofort gespeichert):\n"
+      "  v130     Tempo aller Bewegungen in % (50..300)\n"
+      "  k60      Länge aller Pausen in % (10..200)\n"));
 }
 
 static bool needCalibrated() {
@@ -550,6 +570,15 @@ static void runCommand(char* cmd) {
       goPos(0);
       handleTrigger(true, arg);
       break;
+    case 'v':
+    case 'k':
+      if (cmd[1]) {
+        if (cmd[0] == 'v') M.tempoPct = constrain(arg, 50, 300);
+        else M.pausePct = constrain(arg, 10, 200);
+        saveTiming();
+      }
+      Serial.printf("Tempo %u %% | Pausen %u %% (gespeichert)\n", M.tempoPct, M.pausePct);
+      break;
     case 'l':
       for (uint8_t i = 0; i < PERSONA_COUNT; i++) Serial.printf("  %2u  %s\n", i, PERSONAS[i].name);
       break;
@@ -558,6 +587,7 @@ static void runCommand(char* cmd) {
       printUs();
       Serial.printf("kalibriert %s | Kalibriermodus %s | genervt %u | Laeufe %lu\n", calibrated ? "ja" : "NEIN",
                     calibration ? "AN" : "aus", annoy, (unsigned long)totalRuns);
+      Serial.printf("Tempo %u %% | Pausen %u %%\n", M.tempoPct, M.pausePct);
       if (calibrated) printCalib("Gespeichert:", calib);
       printCalib("Entwurf:    ", draft);
       break;
@@ -595,6 +625,7 @@ void setup() {
   }
 
   calibrated = loadCalib();
+  loadTiming();
 #if CALIB_USE_DEFAULTS
   if (!calibrated) {
     Calib d = {CALIB_DEFAULT_HOME, CALIB_DEFAULT_LID, CALIB_DEFAULT_TOUCH, CALIB_DEFAULT_PUSH};
