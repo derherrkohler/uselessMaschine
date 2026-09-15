@@ -361,6 +361,7 @@ Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 
 | Symptom | Ursache / Lösung |
 |---|---|
+| Schalter ist AN, aber nichts passiert | Die Maschine reagiert auf den Zustand, nicht auf Flanken. `s` zeigt den Grund: **Kalibriermodus AN** (nach `m`, `u`, `+`/`-`, `<`/`>`, `a` bleibt er an → `c`), **blockiert** (alle Klick-Versuche gescheitert → nach `BLOCKED_RETRY_MS` = 4 s neuer Versuch, oder Schalter von Hand aus) oder **nicht kalibriert**. Zeigt `s` den Schalter als „aus“, obwohl er an ist: anderen äußeren Schalter-Pin nehmen. |
 | ESP startet neu, sobald der Servo loslegt; Serial zeigt „BROWNOUT“ | Spannungseinbruch → D1 + C3 einbauen, C1 näher an den Servo, frische Batterien, kürzere/dickere Kabel. Notlösung: `SPEED_LIMIT_PCT_S` auf z. B. `200.0f`. **Den Brownout-Detektor nicht abschalten.** |
 | Servo zuckt beim Einschalten | normal kurz beim Anlegen der Spannung. R2 (10 kΩ Pull-down) hilft; der Code setzt den Pin sofort auf LOW und fährt direkt auf HOME. |
 | Servo brummt/zittert in Ruhe | Arm drückt gegen den Anschlag → HOME 2–3 Schritte davor neu setzen (`h`, `+`/`-`, `H`, `w`). Die Firmware schaltet die PWM in Ruhe ab. |

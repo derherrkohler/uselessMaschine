@@ -175,7 +175,10 @@ static void handleTrigger(bool test = false, int forced = -1) {
     haveLastRun = true;
     retrig = (o == Outcome::Retrigger);
     if (retrig) Serial.println(F("  -> Schon wieder?!"));
-    if (o == Outcome::PushFailed) blockedUntilOff = true;
+    if (o == Outcome::PushFailed) {
+      blockedUntilOff = true;
+      Serial.printf("  -> Pause %u ms (oder Schalter von Hand aus)\n", (unsigned)BLOCKED_RETRY_MS);
+    }
   } while (retrig);
 
   M.testMode = false;
@@ -393,7 +396,10 @@ static void firstRunCalibration() {
   }
 
   bool failed = M.pushFailed;
-  if (failed) blockedUntilOff = true;
+  if (failed) {
+    blockedUntilOff = true;
+    Serial.printf("  -> Pause %u ms (oder Schalter von Hand aus)\n", (unsigned)BLOCKED_RETRY_MS);
+  }
   if (!timedScript(Z_NORMAL, failed ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS)) pendingRetrigger = true;
   M.setGuard(Guard::None);
   Serial.printf("  Dauer %lu ms | Ende: pos %.0f %% = %.0f µs\n", (unsigned long)(millis() - t0), M.pos,
@@ -647,8 +653,9 @@ static void runCommand(char* cmd) {
     case 's':
       Serial.printf("Schalter %s | Servo %s | ", M.sw.isOn() ? "AN" : "aus", M.servo.isAttached() ? "an" : "aus");
       printUs();
-      Serial.printf("kalibriert %s | Kalibriermodus %s | genervt %u | Laeufe %lu\n", calibrated ? "ja" : "NEIN",
-                    calibration ? "AN" : "aus", annoy, (unsigned long)totalRuns);
+      Serial.printf("kalibriert %s | Kalibriermodus %s | blockiert %s | genervt %u | Laeufe %lu\n",
+                    calibrated ? "ja" : "NEIN", calibration ? "AN (Schalter wird ignoriert)" : "aus",
+                    blockedUntilOff ? "JA (Klick gescheitert)" : "nein", annoy, (unsigned long)totalRuns);
       Serial.printf("Tempo %u %% | Pausen %u %%\n", M.tempoPct, M.pausePct);
       if (calibrated) printCalib("Aktiv:  ", calib);
       printCalib("Entwurf:", draft);
@@ -716,11 +723,23 @@ void loop() {
   M.sw.update();
   handleSerial();
 
-  if (calibration) { delay(5); return; }
+  if (calibration) {
+    static bool wasOn = false;
+    bool onNow = M.sw.isOn();
+    if (onNow && !wasOn) Serial.println(F("Kalibriermodus AN – Schalter wird ignoriert. 'c' beendet den Kalibriermodus."));
+    wasOn = onNow;
+    delay(5);
+    return;
+  }
 
   bool on = M.sw.isOn();
   if (blockedUntilOff) {
-    if (!on) blockedUntilOff = false;
+    if (!on) {
+      blockedUntilOff = false;
+    } else if (BLOCKED_RETRY_MS > 0 && millis() - lastRunEnd > BLOCKED_RETRY_MS) {
+      blockedUntilOff = false;
+      Serial.println(F("  -> Pause vorbei, neuer Versuch"));
+    }
   } else if (on) {
     handleTrigger();
     return;

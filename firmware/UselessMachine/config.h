@@ -106,6 +106,9 @@
 #define PUSH_WINDUP_POS    70   // Anlauf-Position (%) für den 2. und 3. Versuch (kleiner = mehr Schwung, dauert länger)
 #define PUSH_WINDUP_STEP   20   // jeder weitere Versuch holt so viel % weiter aus (70 %, dann 50 %)
 #define PUSH_WINDUP_PAUSE_MS 60 // kurze Pause am Anlaufpunkt, bevor erneut gedrückt wird
+// Hat keiner der Versuche geklappt: so lange warten und dann von selbst neu anfangen
+// (0 = erst wieder, wenn der Schalter von Hand ausgeschaltet wurde)
+#define BLOCKED_RETRY_MS 4000
 
 // ---------------------------------------------------------------------
 //  ZEITBUDGET – harte Obergrenzen je Aktion
