@@ -82,8 +82,16 @@ class ServoOut {
 
  private:
   bool attached_ = false;
-  float us_ = SERVO_US_HOME;
+  float us_ = SERVO_US_MID;  // ohne Kalibrierung: erster Puls auf die Mitte
 };
+
+// ---------------------------------------------------------------------
+//  Kalibrierung (µs) – zur Laufzeit geladen, siehe .ino
+// ---------------------------------------------------------------------
+struct Calib {
+  uint16_t home, lid, touch, push;
+};
+Calib calib = {CALIB_DEFAULT_HOME, CALIB_DEFAULT_LID, CALIB_DEFAULT_TOUCH, CALIB_DEFAULT_PUSH};
 
 // ---------------------------------------------------------------------
 //  Bewegungs-Engine + Skript-Interpreter
@@ -115,11 +123,12 @@ class Motion {
   void setGuard(Guard g) { guard_ = g; }
 
   static float posToUs(float p) {
+    const float home = calib.home, lid = calib.lid, touch = calib.touch, push = calib.push;
     if (p <= P_LID)
-      return SERVO_US_HOME + (SERVO_US_LID - SERVO_US_HOME) * (p / (float)P_LID);
+      return home + (lid - home) * (p / (float)P_LID);
     if (p <= P_TOUCH)
-      return SERVO_US_LID + (SERVO_US_TOUCH - SERVO_US_LID) * ((p - P_LID) / (float)(P_TOUCH - P_LID));
-    return SERVO_US_TOUCH + (SERVO_US_PUSH - SERVO_US_TOUCH) * ((p - P_TOUCH) / (100.0f - P_TOUCH));
+      return lid + (touch - lid) * ((p - P_LID) / (float)(P_TOUCH - P_LID));
+    return touch + (push - touch) * ((p - P_TOUCH) / (100.0f - P_TOUCH));
   }
 
   // Wartet und überwacht dabei den Schalter. false = Abbruch durch Guard.

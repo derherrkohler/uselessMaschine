@@ -33,23 +33,30 @@
 #define DEBOUNCE_MS                 30
 
 // ---------------------------------------------------------------------
-//  SERVO-KALIBRIERUNG (Mikrosekunden)
-//  Mit dem seriellen Monitor ermitteln (Befehle: c, u1500, +, -, h, t, p).
+//  SERVO-KALIBRIERUNG
+//  Wird mit montiertem Arm im seriellen Monitor eingestellt und im ESP
+//  gespeichert (README, Abschnitt 8). Ohne gespeicherte Kalibrierung sendet
+//  der ESP KEINE Servo-Pulse – der Arm bleibt liegen.
 //  Positionen im Code sind 0..100 %:
-//    0  = HOME  : Arm ruht in der Box, Deckel liegt auf der Box (nicht auf dem Arm!)
-//    30 = LID   : Arm berührt den Deckel von innen, Deckel noch zu   (Befehl 'd')
-//    90 = TOUCH : Arm berührt den Hebel, schaltet aber noch NICHT
-//    100= PUSH  : Arm hat den Schalter sicher umgelegt
-//  HOME darf größer als PUSH sein (Servo andersherum eingebaut) – egal.
+//    0  = HOME  : Arm ruht in der Box, kurz vor dem Anschlag     (Befehl 'H')
+//    30 = LID   : Arm berührt den Deckel von innen, Deckel noch zu (Befehl 'D')
+//    90 = TOUCH : Arm berührt den Hebel, schaltet aber noch NICHT  (Befehl 'T')
+//    100= PUSH  : Arm hat den Schalter sicher umgelegt            (Befehl 'P')
+//  Die Drehrichtung ergibt sich automatisch aus den Werten.
 // ---------------------------------------------------------------------
-// Startwerte für "Servo dreht zum Schalter hin mit kleiner werdenden µs".
-// Fährt der Arm falschherum: Werte spiegeln (neu = 3000 − alt).
-#define SERVO_US_HOME    2000
-#define SERVO_US_LID     1750
-#define SERVO_US_TOUCH   1150
-#define SERVO_US_PUSH    1000
-#define SERVO_US_MIN      500   // harte Sicherheitsgrenzen
-#define SERVO_US_MAX     2500
+// Optional: feste Werte (µs) statt gespeicherter Kalibrierung. Gilt nur,
+// wenn CALIB_USE_DEFAULTS true ist UND im ESP nichts gespeichert ist.
+#define CALIB_USE_DEFAULTS   false
+#define CALIB_DEFAULT_HOME   2000
+#define CALIB_DEFAULT_LID    1750
+#define CALIB_DEFAULT_TOUCH  1150
+#define CALIB_DEFAULT_PUSH   1000
+
+#define SERVO_US_MID         1500    // ≈ 90°: erster Puls beim Kalibrieren ('m')
+#define SERVO_US_PER_DEG     10.5f   // SG90 ≈ 1900 µs / 180° – nur für die Gradanzeige
+#define JOG_US_PER_S         250.0f  // Tempo beim Kalibrieren (≈ 24°/s)
+#define SERVO_US_MIN          500    // harte Sicherheitsgrenzen
+#define SERVO_US_MAX         2500
 
 #define SERVO_PWM_BITS     14   // 14 Bit @ 50 Hz ≈ 1,2 µs Auflösung (C3 & S3 können max. 14)
 #define SERVO_LEDC_CHANNEL  0   // nur für Arduino-Core 2.x relevant

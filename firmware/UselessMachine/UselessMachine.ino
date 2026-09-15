@@ -4,12 +4,13 @@
    ESP32-C3 SuperMini / ESP32-S3 SuperMini – Arduino-Core 2.x oder 3.x
 
    Dateien:
-     config.h    – Pins, Servo-Kalibrierung, Verhalten
+     config.h    – Pins, Verhalten, optionale Kalibrier-Vorgaben
      bytecode.h  – Mini-Skriptsprache (Opcodes + Makros)
      motion.h    – Schalter, Servo (LEDC), Bewegungs-Engine, Interpreter
      scripts.h   – Gesten, Stimmungen, Persönlichkeiten
 
    Ein/Aus über den Hauptschalter der Box (kein Deep Sleep).
+   Kalibrierung wird im ESP gespeichert (Preferences/NVS).
    Serieller Monitor (115200 Baud, "Neue Zeile"): '?' zeigt die Befehle.
   =====================================================================
 */
@@ -19,6 +20,9 @@
 #include "scripts.h"
 
 #include <esp_system.h>
+#include <Preferences.h>
+
+#define PREFS_NS "useless"
 
 Motion M;
 
@@ -32,8 +36,10 @@ uint32_t lastRunEnd = 0;
 uint32_t peekAt = 0;
 bool     justPoweredOn = true;      // erste Vorstellung nach dem Einschalten: oft verschlafen
 bool     blockedUntilOff = false;   // nach fehlgeschlagenem Klick: erst wieder, wenn Schalter aus
-bool     calibration = false;
+bool     calibration = false;       // Kalibriermodus: Schalter wird ignoriert
+bool     calibrated = false;        // gültige Kalibrierung vorhanden
 bool     pendingRetrigger = false;
+Calib    draft = {0, 0, 0, 0};      // Kalibrierung in Arbeit (0 = noch nicht gesetzt)
 
 // ---------------------------------------------------------------------
 //  Planung einer Vorstellung
@@ -165,7 +171,7 @@ static Outcome perform(const Plan& p, bool test) {
     M.push(1e6f, E_LIN);
   }
   bool failed = M.pushFailed;
-  if (failed) Serial.println(F("  !! Schalter ließ sich nicht umlegen -> SERVO_US_PUSH / Mechanik prüfen"));
+  if (failed) Serial.println(F("  !! Schalter ließ sich nicht umlegen -> PUSH neu kalibrieren (P, w) / Mechanik prüfen"));
 
   // 5: Rückzug. Schaltet der Mensch wieder ein -> sofort neue Vorstellung.
   M.setGuard((test || failed) ? Guard::None : Guard::AbortIfOn);
@@ -214,71 +220,226 @@ static void rgbLedOff() {
 #endif
 
 // ---------------------------------------------------------------------
+//  Kalibrierung: prüfen, laden, speichern
+// ---------------------------------------------------------------------
+static bool calibValid(const Calib& c, bool verbose = false) {
+  const uint16_t v[4] = {c.home, c.lid, c.touch, c.push};
+  const char* names[4] = {"HOME (H)", "DECKEL (D)", "TOUCH (T)", "PUSH (P)"};
+  bool ok = true;
+  for (int i = 0; i < 4; i++) {
+    if (v[i] < SERVO_US_MIN || v[i] > SERVO_US_MAX) {
+      if (verbose) Serial.printf("  %s fehlt oder ungültig\n", names[i]);
+      ok = false;
+    }
+  }
+  if (!ok) return false;
+  bool up = c.push > c.home;
+  for (int i = 1; i < 4; i++) {
+    if (up ? v[i] <= v[i - 1] : v[i] >= v[i - 1]) {
+      if (verbose) Serial.println(F("  Reihenfolge stimmt nicht: HOME -> DECKEL -> TOUCH -> PUSH müssen in eine Richtung laufen"));
+      return false;
+    }
+  }
+  if (abs((int)c.push - (int)c.home) < 200) {
+    if (verbose) Serial.println(F("  HOME und PUSH liegen zu nah beieinander"));
+    return false;
+  }
+  return true;
+}
+
+static bool loadCalib() {
+  Preferences prefs;
+  if (!prefs.begin(PREFS_NS, true)) return false;  // noch nie gespeichert
+  Calib c;
+  bool ok = prefs.getBytesLength("calib") == sizeof(c) && prefs.getBytes("calib", &c, sizeof(c)) == sizeof(c) &&
+            calibValid(c);
+  prefs.end();
+  if (ok) calib = c;
+  return ok;
+}
+
+static bool saveCalib(const Calib& c) {
+  Preferences prefs;
+  if (!prefs.begin(PREFS_NS, false)) return false;
+  bool ok = prefs.putBytes("calib", &c, sizeof(c)) == sizeof(c);
+  prefs.end();
+  return ok;
+}
+
+static void clearCalib() {
+  Preferences prefs;
+  if (prefs.begin(PREFS_NS, false)) {
+    prefs.remove("calib");
+    prefs.end();
+  }
+}
+
+// Servo langsam auf einen µs-Wert fahren. Beim allerersten Attach springt der
+// Servo auf die zuletzt gesetzte Sollposition (ohne Kalibrierung: Mitte).
+static void rampUs(float target) {
+  target = constrain(target, (float)SERVO_US_MIN, (float)SERVO_US_MAX);
+  M.servo.attach();
+  float from = M.servo.us();
+  float durMs = fabs(target - from) / JOG_US_PER_S * 1000.0f;
+  uint32_t t0 = millis();
+  for (;;) {
+    float t = durMs > 0 ? (millis() - t0) / durMs : 1.0f;
+    if (t > 1.0f) t = 1.0f;
+    M.servo.writeUs(from + (target - from) * t);
+    if (t >= 1.0f) break;
+    delay(15);
+  }
+  M.lastMotion = millis();
+}
+
+static float degFromHome(float us) {
+  uint16_t home = draft.home ? draft.home : (calibrated ? calib.home : 0);
+  return home ? fabs(us - home) / SERVO_US_PER_DEG : -1.0f;
+}
+
+static void printUs() {
+  float d = degFromHome(M.servo.us());
+  if (d >= 0) Serial.printf("%.0f µs  (≈ %.0f° ab HOME)\n", M.servo.us(), d);
+  else Serial.printf("%.0f µs\n", M.servo.us());
+}
+
+static void printCalib(const char* title, const Calib& c) {
+  Serial.printf("%s  HOME %u | DECKEL %u | TOUCH %u | PUSH %u µs", title, c.home, c.lid, c.touch, c.push);
+  if (c.home && c.push) Serial.printf("  (PUSH ≈ %.0f° ab HOME)", fabs((float)c.push - c.home) / SERVO_US_PER_DEG);
+  Serial.println();
+}
+
+// ---------------------------------------------------------------------
 //  Serielle Befehle (Kalibrierung & Test)
 // ---------------------------------------------------------------------
 static void printHelp() {
   Serial.println(F(
-      "\nBefehle:\n"
-      "  c        Kalibriermodus an/aus (Schalter wird ignoriert)\n"
-      "  u1500    Servo direkt auf 1500 µs (aktiviert Kalibriermodus)\n"
-      "  + / -    +/-10 µs  (z. B. +25)\n"
-      "  h d t p  fahre zu HOME / DECKEL / TOUCH / PUSH (kalibrierte Werte)\n"
-      "  g42      fahre zu Position 42 %\n"
-      "  r        Testlauf zufällige Persönlichkeit (ohne Schalter)\n"
-      "  n7       Testlauf Persönlichkeit Nr. 7\n"
+      "\nKalibrieren (Arm bleibt montiert, alles fährt langsam):\n"
+      "  m        auf die Mitte (1500 µs ≈ 90°) – immer der erste Schritt\n"
+      "  + / -    10 µs (≈ 1°) weiter, z. B. +50 / -50\n"
+      "  u1500    langsam auf 1500 µs\n"
+      "  H D T P  aktuelle Stellung als HOME / DECKEL / TOUCH / PUSH merken\n"
+      "  w        Kalibrierung speichern (bleibt auch nach neuem Flashen)\n"
+      "  x        gespeicherte Kalibrierung löschen\n"
+      "Nach dem Speichern:\n"
+      "  c        Kalibriermodus an/aus (aus = Maschine reagiert auf den Schalter)\n"
+      "  h d t p  langsam zu HOME / DECKEL / TOUCH / PUSH\n"
+      "  g42      langsam zu Position 42 %\n"
+      "  r / n7   Testlauf zufällig / Persönlichkeit Nr. 7\n"
       "  l        Persönlichkeiten auflisten\n"
       "  s        Status\n"));
 }
 
+static bool needCalibrated() {
+  if (calibrated) return true;
+  Serial.println(F("Noch nicht kalibriert: erst m, H D T P setzen, dann w."));
+  return false;
+}
+
+// Langsam auf eine %-Position (setzt die Engine-Position mit)
 static void goPos(float target) {
-  M.servo.attach();
-  M.setGuard(Guard::None);
-  M.mood = MOODS[mNormal];
-  M.moveTo(target, 60, E_SMOOTH, 100);
-  Serial.printf("pos %.0f %% = %.0f µs\n", M.pos, M.servo.us());
+  rampUs(Motion::posToUs(target));
+  M.pos = target;
+  Serial.printf("pos %.0f %% = ", target);
+  printUs();
+}
+
+static void setDraft(char which) {
+  uint16_t us = (uint16_t)(M.servo.us() + 0.5f);
+  switch (which) {
+    case 'H': draft.home = us; Serial.print(F("HOME   = ")); break;
+    case 'D': draft.lid = us; Serial.print(F("DECKEL = ")); break;
+    case 'T': draft.touch = us; Serial.print(F("TOUCH  = ")); break;
+    case 'P': draft.push = us; Serial.print(F("PUSH   = ")); break;
+  }
+  printUs();
+  printCalib("Entwurf:", draft);
 }
 
 static void runCommand(char* cmd) {
   int arg = atoi(cmd + 1);
   switch (cmd[0]) {
     case '?': printHelp(); break;
-    case 'c':
-      calibration = !calibration;
-      M.servo.attach();
-      Serial.printf("Kalibriermodus %s\n", calibration ? "AN" : "AUS");
+
+    // --- Kalibrieren ---
+    case 'm':
+      calibration = true;
+      Serial.println(F("Mitte (≈ 90°) ..."));
+      rampUs(SERVO_US_MID);
+      printUs();
       break;
     case 'u':
       calibration = true;
-      M.servo.attach();
-      M.servo.writeUs(arg);
-      Serial.printf("%.0f µs  (danach 'h' benutzen, bevor normale Bewegungen laufen)\n", M.servo.us());
+      rampUs(arg);
+      printUs();
       break;
     case '+':
     case '-': {
       calibration = true;
       int step = arg ? arg : 10;
-      M.servo.attach();
-      M.servo.writeUs(M.servo.us() + (cmd[0] == '+' ? step : -step));
-      Serial.printf("%.0f µs\n", M.servo.us());
+      rampUs(M.servo.us() + (cmd[0] == '+' ? step : -step));
+      printUs();
       break;
     }
-    case 'h': goPos(0); break;
-    case 'd': goPos(P_LID); break;
-    case 't': goPos(P_TOUCH); break;
-    case 'p': goPos(100); delay(300); goPos(P_CLOSE); break;
-    case 'g': goPos(constrain(arg, 0, 100)); break;
-    case 'r': handleTrigger(true); break;
+    case 'H': case 'D': case 'T': case 'P':
+      if (!M.servo.isAttached()) { Serial.println(F("Servo noch aus – erst m.")); break; }
+      setDraft(cmd[0]);
+      break;
+    case 'w':
+      if (!calibValid(draft, true)) { Serial.println(F("Nicht gespeichert.")); break; }
+      if (!saveCalib(draft)) { Serial.println(F("Speichern fehlgeschlagen!")); break; }
+      calib = draft;
+      calibrated = true;
+      printCalib("Gespeichert:", calib);
+      goPos(0);
+      Serial.println(F("Mit h d t p prüfen, dann c (Kalibriermodus aus)."));
+      break;
+    case 'x':
+      clearCalib();
+      calibrated = false;
+      calibration = true;
+      draft = {0, 0, 0, 0};
+      Serial.println(F("Kalibrierung gelöscht. Neu beginnen mit m."));
+      break;
+
+    // --- Nach dem Kalibrieren ---
+    case 'c':
+      if (!needCalibrated()) break;
+      calibration = !calibration;
+      if (!calibration) goPos(0);
+      Serial.printf("Kalibriermodus %s\n", calibration ? "AN" : "AUS");
+      break;
+    case 'h': if (needCalibrated()) goPos(0); break;
+    case 'd': if (needCalibrated()) goPos(P_LID); break;
+    case 't': if (needCalibrated()) goPos(P_TOUCH); break;
+    case 'p':
+      if (!needCalibrated()) break;
+      goPos(100);
+      delay(300);
+      goPos(P_CLOSE);
+      break;
+    case 'g': if (needCalibrated()) goPos(constrain(arg, 0, 100)); break;
+    case 'r':
+      if (!needCalibrated()) break;
+      goPos(0);
+      handleTrigger(true);
+      break;
     case 'n':
-      if (arg >= 0 && arg < PERSONA_COUNT) handleTrigger(true, arg);
-      else Serial.printf("0..%u\n", PERSONA_COUNT - 1);
+      if (!needCalibrated()) break;
+      if (arg < 0 || arg >= PERSONA_COUNT) { Serial.printf("0..%u\n", PERSONA_COUNT - 1); break; }
+      goPos(0);
+      handleTrigger(true, arg);
       break;
     case 'l':
       for (uint8_t i = 0; i < PERSONA_COUNT; i++) Serial.printf("  %2u  %s\n", i, PERSONAS[i].name);
       break;
     case 's':
-      Serial.printf("Schalter %s | pos %.1f %% | %.0f µs | genervt %u | Laeufe %lu | Kalibrierung %s\n",
-                    M.sw.isOn() ? "AN" : "aus", M.pos, M.servo.us(), annoy, (unsigned long)totalRuns,
-                    calibration ? "AN" : "aus");
+      Serial.printf("Schalter %s | Servo %s | ", M.sw.isOn() ? "AN" : "aus", M.servo.isAttached() ? "an" : "aus");
+      printUs();
+      Serial.printf("kalibriert %s | Kalibriermodus %s | genervt %u | Laeufe %lu\n", calibrated ? "ja" : "NEIN",
+                    calibration ? "AN" : "aus", annoy, (unsigned long)totalRuns);
+      if (calibrated) printCalib("Gespeichert:", calib);
+      printCalib("Entwurf:    ", draft);
       break;
     default: Serial.println(F("? für Hilfe")); break;
   }
@@ -313,10 +474,29 @@ void setup() {
                      "Elko/Batterien prüfen oder SPEED_LIMIT_PCT_S setzen."));
   }
 
-  M.begin();
+  calibrated = loadCalib();
+#if CALIB_USE_DEFAULTS
+  if (!calibrated) {
+    Calib d = {CALIB_DEFAULT_HOME, CALIB_DEFAULT_LID, CALIB_DEFAULT_TOUCH, CALIB_DEFAULT_PUSH};
+    if (calibValid(d)) { calib = d; calibrated = true; }
+  }
+#endif
+
+  if (calibrated) {
+    draft = calib;
+    M.begin();  // Arm liegt in HOME -> Puls auf HOME bewegt ihn nicht
+  } else {
+    M.sw.begin();  // KEINE Servo-Pulse, Arm bleibt liegen
+    calibration = true;
+  }
 
   Serial.printf("\nUseless Machine bereit (%s). %u Persönlichkeiten. '?' für Hilfe.\n",
                 CONFIG_IDF_TARGET, PERSONA_COUNT);
+  if (calibrated) {
+    printCalib("Kalibrierung:", calib);
+  } else {
+    Serial.println(F("!! Noch nicht kalibriert: Servo bleibt aus, Schalter wird ignoriert. Start mit 'm'."));
+  }
 }
 
 void loop() {

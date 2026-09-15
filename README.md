@@ -278,7 +278,7 @@ python3 tools/validate_scripts.py
 Der Deckel ist passiv: Der Arm drückt ihn auf, das Eigengewicht schließt ihn wieder. Daraus folgt:
 
 **In der Software**
-- Zwischen HOME und dem Punkt, an dem der Arm den Deckel berührt (`SERVO_US_LID`, Position 30 %), bewegt sich der Arm **unsichtbar**. Langsame Bewegungen fahren diesen Leerweg deshalb automatisch zügig (`LID_FAST_TRAVEL_PCT_S`), damit kein totes Warten entsteht.
+- Zwischen HOME und dem Punkt, an dem der Arm den Deckel berührt (Kalibrierpunkt DECKEL, Position 30 %), bewegt sich der Arm **unsichtbar**. Langsame Bewegungen fahren diesen Leerweg deshalb automatisch zügig (`LID_FAST_TRAVEL_PCT_S`), damit kein totes Warten entsteht.
 - Gesten, die in der Box beginnen, arbeiten mit dem Deckel: **Deckel klappern** (`R_RATTLE`), Aufwachen mit Deckelspalt und Zittern, Anklopfen, Schreck mit Deckel-Aufschnappen, **knarrende Tür** (`Z_CREAK`: Deckel halb offen halten und langsam absenken), Flucht mit nachträglichem Zuhalten.
 - Das spätere „Nachgucken“ hebt den Deckel einen Spalt (45 %).
 - Die PWM wird nur abgeschaltet, wenn der Arm auf HOME steht, also wenn der Deckel auf der Box liegt und nicht auf dem Arm.
@@ -315,17 +315,22 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/UselessMac
 
 ## 8. Inbetriebnahme & Kalibrierung (wichtig!)
 
-1. **Arm noch nicht festschrauben** (Servohorn locker oder abgenommen).
-2. Flashen, seriellen Monitor öffnen (115200 Baud, Zeilenende „Neue Zeile“), `?` eingeben.
-3. `c` → Kalibriermodus (der Schalter wird ignoriert).
-4. `u1500` und dann mit `+` / `-` (oder `+50`) die Position suchen, in der der Arm **in der Box ruht** → Wert als `SERVO_US_HOME` notieren.
-5. Arm montieren. Mit `+`/`-` die Position suchen, in der der Arm den **Deckel von innen gerade berührt**, der Deckel aber noch zu ist → `SERVO_US_LID`.
-6. Weiter, bis der Arm den Hebel **gerade berührt, aber noch nicht umlegt** → `SERVO_US_TOUCH`.
-7. Weiter, bis der Schalter **sicher umkippt**, plus ein kleines Stück → `SERVO_US_PUSH`. Nicht weiter als nötig, sonst blockiert der Servo.
-8. Werte in `config.h` eintragen, neu flashen. Mit `h`, `d`, `t`, `p` prüfen.
-9. `s` zeigt, ob der Schalter als AN/aus erkannt wird.
-10. Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten ohne Schalter testen.
-11. `c` → Kalibriermodus aus → echter Betrieb.
+Die Kalibrierung funktioniert mit **fertig montiertem Arm** und wird **im ESP gespeichert**. Sie bleibt auch nach neuem Flashen erhalten, solange „Erase All Flash Before Sketch Upload“ aus ist. `config.h` muss dafür nicht angefasst werden.
+
+Solange nichts gespeichert ist, sendet der ESP **keine Pulse** an den Servo: Der Arm bleibt liegen, der Schalter wird ignoriert.
+
+1. **Hauptschalter aus**, USB anschließen (ESP und Servo laufen dann aus USB), flashen, seriellen Monitor öffnen (115200 Baud, Zeilenende „Neue Zeile“).
+2. `m` → der Arm fährt auf die **Mitte (1500 µs ≈ 90°)**, also etwa zum Schalter. Das ist der einzige Sprung, egal an welchem Ende er vorher lag. Danach fährt alles langsam.
+3. Mit `+50` oder `-50` herausfinden, in welcher Richtung die Box liegt. Dann mit `+` / `-` (10 µs ≈ 1°) bis an den **Anschlag in der Box**. Sobald er anliegt, **2–3 Schritte zurück**, sonst drückt der Servo dauernd dagegen und brummt → `H`.
+4. Richtung Schalter, bis der Arm den **Deckel von innen gerade berührt** → `D`.
+5. Weiter, bis der Arm den **Schalterhebel gerade berührt** (noch nicht umlegt) → `T`.
+6. Weiter, bis der Schalter **sicher umkippt**, plus 1–2 Schritte → `P`. `s` zeigt die Winkel ab HOME, der Schalter sollte bei ca. 90° liegen.
+7. `w` → speichern. Die Firmware prüft, dass die vier Punkte in einer Richtung liegen, und fährt langsam nach HOME.
+8. Mit `h`, `d`, `t`, `p` prüfen. Einzelne Punkte korrigieren: hinfahren (`t`, dann `+`/`-`), neu merken (`T`), wieder `w`.
+9. `s` zeigt, ob der Schalter als AN/aus erkannt wird. Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
+10. `c` → Kalibriermodus aus. USB abziehen, Hauptschalter an → Betrieb.
+
+Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 
 ---
 
@@ -335,16 +340,17 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/UselessMac
 |---|---|
 | ESP startet neu, sobald der Servo loslegt; Serial zeigt „BROWNOUT“ | Spannungseinbruch → D1 + C3 einbauen, C1 näher an den Servo, frische Batterien, kürzere/dickere Kabel. Notlösung: `SPEED_LIMIT_PCT_S` auf z. B. `200.0f`. **Den Brownout-Detektor nicht abschalten.** |
 | Servo zuckt beim Einschalten | normal kurz beim Anlegen der Spannung. R2 (10 kΩ Pull-down) hilft; der Code setzt den Pin sofort auf LOW und fährt direkt auf HOME. |
-| Servo brummt/zittert in Ruhe | Arm drückt gegen einen Anschlag → `SERVO_US_HOME` etwas zurücknehmen. Die Firmware schaltet die PWM in Ruhe ab. |
-| Schalter wird nicht umgelegt, Meldung „ließ sich nicht umlegen“ | `SERVO_US_PUSH` weiter, Hebelarm kürzer, Servo zu schwach oder Batterie leer. Die Maschine wartet dann, bis du den Schalter selbst ausmachst (kein Dauer-Blockieren). |
+| Servo brummt/zittert in Ruhe | Arm drückt gegen den Anschlag → HOME 2–3 Schritte davor neu setzen (`h`, `+`/`-`, `H`, `w`). Die Firmware schaltet die PWM in Ruhe ab. |
+| Schalter wird nicht umgelegt, Meldung „ließ sich nicht umlegen“ | PUSH etwas weiter setzen (`p`, `+`/`-`, `P`, `w`), Hebelarm kürzer, Servo zu schwach oder Batterie leer. Die Maschine wartet dann, bis du den Schalter selbst ausmachst (kein Dauer-Blockieren). |
 | Die Maschine hält den Schalter für schon aus | Schaltlogik andersherum → anderen äußeren Kontakt nehmen oder `SWITCH_ON_LEVEL` auf `HIGH` (dann Pull-down statt Pull-up). |
 | Schalter löst zufällig aus | Störungen durch Servokabel → R3 + C5, Leitungen verdrillen und getrennt verlegen. |
 | Upload klappt nicht, kein USB-Port sichtbar | **BOOT halten, RESET tippen (oder USB einstecken), BOOT loslassen**, dann flashen. |
 | Keine Serial-Ausgabe (C3/S3) | „USB CDC On Boot: Enabled“ vergessen. |
 | Board bootet nicht, wenn der Schalter angeschlossen ist | Schalter hängt an einem Strapping-Pin (C3: 2/8/9, S3: 0/3/45/46) → anderen GPIO nehmen. |
-| Servo fährt „falschherum“ | kein Problem: `SERVO_US_HOME` darf größer als `SERVO_US_PUSH` sein. |
-| Deckel bleibt offen stehen | Öffnungswinkel zu groß (≥ 90°) → Anschlag einbauen oder `SERVO_US_PUSH`/Armgeometrie ändern. |
+| Servo fährt „falschherum“ | Die Richtung ergibt sich aus der Kalibrierung. `x`, dann neu kalibrieren (Abschnitt 8). |
+| Nach dem Einschalten passiert gar nichts, Servo kraftlos | Noch keine Kalibrierung gespeichert → Abschnitt 8. |
+| Deckel bleibt offen stehen | Öffnungswinkel zu groß (≥ 90°) → Anschlag einbauen oder PUSH-Punkt/Armgeometrie ändern. |
 | Deckel hakt am Arm / Arm stockt beim Aufdrücken | Kontaktstelle glätten (Filz/PTFE), Deckel leichter machen, Kontaktpunkt weiter weg vom Scharnier. |
-| Gesten „in der Box“ sind nicht zu sehen | `SERVO_US_LID` zu weit → neu kalibrieren, der Wert muss genau die erste Berührung des Deckels sein. |
+| Gesten „in der Box“ sind nicht zu sehen | DECKEL-Punkt zu weit → neu setzen (`d`, `+`/`-`, `D`, `w`), er muss genau die erste Berührung des Deckels sein. |
 | Schalter kippt nur in die Mitte | Schalter ist ON-OFF-ON → ON-ON-Schalter verwenden. |
 | Micro-Servo wird heiß | Servo steht dauerhaft unter Last (Kalibrierung zu weit) oder ist ein Fake-„MG90S“ mit Plastikgetriebe. |
