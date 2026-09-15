@@ -1,7 +1,7 @@
 # Useless Machine mit Charakter
 
 Kippschalter an → ein Servo-Arm kommt aus der Box und legt den Schalter wieder um.
-Das Ganze passiert jedes Mal ein bisschen anders: mal zögerlich, mal hektisch, mal beleidigt.
+Mal schleicht er sich langsam an und macht plopp, mal zack, mal vorsichtig hin und her und zack. Und wer zu schnell hintereinander schaltet, macht ihn sauer.
 
 - Firmware: [`firmware/UselessMachine/`](firmware/UselessMachine/) (Arduino, ESP32-S3 SuperMini)
 - Getestet: kompiliert mit arduino-esp32 **3.3.8** für `esp32s3`. Auf echter Hardware ist der Code **noch nicht** gelaufen. Die Kalibrierung (Abschnitt 8) ist Pflicht.
@@ -177,9 +177,9 @@ Für den ESP hinter der Diode: **100–220 µF + 100 nF** am 5V/GND-Pin des Boar
 ## 5. Softwarearchitektur
 
 ```
-UselessMachine.ino   Zustandsautomat, Auswahl der Persönlichkeit, "Launen", Serial
+UselessMachine.ino   Ablauf, Auswahl der Aktion, Ärger-Zähler, Kalibrierung, Serial
        │
-       ├── scripts.h    Daten: Gesten (Bytecode), 10 Stimmungen, 53 Persönlichkeiten
+       ├── scripts.h    Daten: die Aktionen als Bytecode (Anschleichen, Zack, Vorsichtig, Sauer)
        ├── motion.h     Engine: Schalter entprellen · Servo (LEDC, µs) · moveTo/wiggle/jitter/push · Interpreter
        ├── bytecode.h   Die Skriptsprache: Opcodes + Makros
        └── config.h     Pins, Kalibrierung, Verhalten
@@ -215,7 +215,7 @@ const uint8_t A_RUNUPS[] = {
 ```
 
 Befehle: `MOVE`, `MOVER` (zufälliges Ziel), `REL`, `WAIT`, `NAP`, `WIGGLE`, `JITTER`, `LOOP/NEXT` (zufällige Anzahl, verschachtelbar), `CHANCE` (nächsten Befehl nur mit x % Wahrscheinlichkeit), `PUSH`, `HOME`.
-Alle **58 Gesten zusammen belegen 684 Bytes**, jede Persönlichkeit 6 Bytes plus Name.
+Alle Skripte zusammen belegen nur wenige Dutzend Bytes.
 
 Sicherheitsnetz im Interpreter: Gesten werden auf max. 94 % begrenzt. Nur `PUSH` darf bis 100 % und damit an den Schalter. Unbekannte Opcodes und Endlosschleifen werden abgefangen.
 
@@ -223,32 +223,32 @@ Sicherheitsnetz im Interpreter: Gesten werden auf max. 94 % begrenzt. Nur `PUSH`
 
 ```
 Schalter AN
-  → Laune aktualisieren (genervt?)  → Persönlichkeit wählen → Stimmung anpassen
-  → R Reaktion  → A Anfahrt  → N Theater vor dem Schalter      [Mensch schaltet selbst aus? → "Nanu?"-Geste]
-  → K Klick (mit Erfolgskontrolle)                               [klappt nicht? → Retry, dann Fehlerhinweis]
-  → Z Rückzug                                                    [Mensch schaltet wieder an? → sofort nochmal, genervter]
-  → evtl. später "nachgucken" → PWM aus → warten auf den nächsten Schalter
+  → Ärger aktualisieren  → Aktion wählen (schnell hintereinander? → sauer)
+  → Anfahrt                                                    [Mensch schaltet selbst aus? → zurück]
+  → Klick (mit Erfolgskontrolle)                               [klappt nicht? → nochmal, schneller und weiter]
+  → Zurück                                                     [Mensch schaltet wieder an? → sofort nochmal, sauer]
+  → PWM aus → warten auf den nächsten Schalter
 ```
 
 ---
 
-## 6. Wie aus Bausteinen 50+ Persönlichkeiten werden
+## 6. Die Aktionen
 
-Vier Schichten multiplizieren sich:
+Bewusst einfach gehalten, alles steht in `scripts.h`:
 
-1. **Gesten-Bibliothek in 5 Phasen**: 9 Reaktionen × 13 Anfahrten × 15 Theater × 8 Klicks × 11 Rückzüge = **154.440 Abläufe**.
-2. **10 Stimmungen** skalieren jede Geste: Tempo, Geduld (Pausenlänge), Nervosität (Wackelstärke), Schlampigkeit (Positionsstreuung). Aus dem gleichen „Zögern“ wird so müdes Zögern oder panisches Zögern.
-3. **53 kuratierte Persönlichkeiten** als 6-Byte-Rezept, z. B.
-   `{"Genervter Beamter", mAnnoyed, rLong, aStroll, nSigh, kReluctant, zSulk}`.
-   Rezepte dürfen `RND` enthalten („Chaot“, „Launisch“, „Wundertüte“). 30 % der Auslösungen sind komplett frei kombiniert („Freestyle“).
-4. **Gedächtnis und Laune**:
-   - Wird die Maschine schnell hintereinander ausgelöst, steigt `annoy`. Ab 60 % kommen bevorzugt genervte, hektische oder wütende Charaktere, und alles wird schneller und ungeduldiger.
-   - Wer während des Rückzugs wieder einschaltet, bekommt sofort eine gereizte Reaktion.
-   - Erste Aktion nach dem Einschalten der Box: mit 50 % Wahrscheinlichkeit verschlafen.
-   - Die letzten 5 Persönlichkeiten werden nicht sofort wiederholt.
-   - Dazu Zufall in **jedem** Tempo (±15 %), jeder Pause (±10 % plus Min/Max-Bereich) und jeder Zielposition.
+| Nr. | Aktion | Ablauf |
+|---|---|---|
+| 1 | **Anschleichen und plopp** | langsam heranschleichen, kurz innehalten, zack |
+| 2 | **Zack** | sofort und schnell |
+| 3 | **Vorsichtig und zack** | heran, 2- bis 3-mal vor und zurück, zack |
+| 4 | **Sauer!** | sofort zack, drohend schütteln, mit Vollgas zurück |
 
-Eine neue Persönlichkeit ist eine Zeile in `scripts.h`, eine neue Geste ein Byte-Array plus Eintrag in Tabelle und Enum. `static_assert` meldet beim Kompilieren, wenn Tabelle und Enum nicht zusammenpassen.
+- Die Aktionen 1–3 wechseln zufällig ab, nie zweimal dieselbe hintereinander.
+- **Sauer werden:** Jedes Umschalten innerhalb von 8 s nach der letzten Aktion erhöht den Ärger. Mit wachsendem Ärger werden auch die normalen Aktionen schneller. Ab dem 2. schnellen Umschalten, oder wenn man während des Rückzugs wieder einschaltet, kommt **Sauer!**. Der Ärger baut sich mit der Zeit wieder ab.
+- Einstellbar in `config.h`: `ANNOY_WINDOW_MS`, `ANNOY_STEP`, `ANNOY_GRUMPY_LEVEL`, `ANNOY_DECAY_PER_S`.
+- Kleine Zufallsvariation in Tempo und Pausen gibt es trotzdem, damit es nicht mechanisch wirkt.
+
+Eine eigene Aktion: Anfahrt-Skript schreiben (Befehle siehe oben) und eine Zeile in `ACTIONS` ergänzen.
 
 Neue Gesten prüfen (Opcodes, Argumente, LOOP/NEXT-Paare, Größe):
 ```bash
@@ -263,8 +263,6 @@ Der Deckel ist passiv: Der Arm drückt ihn auf, das Eigengewicht schließt ihn w
 
 **In der Software**
 - Zwischen HOME und dem Punkt, an dem der Arm den Deckel berührt (Kalibrierpunkt DECKEL, Position 30 %), bewegt sich der Arm **unsichtbar**. Langsame Bewegungen fahren diesen Leerweg deshalb automatisch zügig (`LID_FAST_TRAVEL_PCT_S`), damit kein totes Warten entsteht.
-- Gesten, die in der Box beginnen, arbeiten mit dem Deckel: **Deckel klappern** (`R_RATTLE`), Aufwachen mit Deckelspalt und Zittern, Anklopfen, Schreck mit Deckel-Aufschnappen, **knarrende Tür** (`Z_CREAK`: Deckel halb offen halten und langsam absenken), Flucht mit nachträglichem Zuhalten.
-- Das spätere „Nachgucken“ hebt den Deckel einen Spalt (45 %).
 - Die PWM wird nur abgeschaltet, wenn der Arm auf HOME steht, also wenn der Deckel auf der Box liegt und nicht auf dem Arm.
 
 **In der Mechanik**
@@ -317,15 +315,15 @@ Solange nichts gespeichert ist, sendet der ESP **keine Pulse** an den Servo: Der
 
 Einzelne Punkte korrigieren: hinfahren (z. B. `t`), mit `+` / `-` (10 µs ≈ 1°) nachstellen, neu merken (`H`, `D`, `T` oder `P`), dann `w` zum Speichern. `s` zeigt alle Werte und die Winkel ab HOME.
 
-- **TOUCH** muss den Hebel berühren, darf ihn aber **nicht umlegen**. Sonst stören Gesten wie „antippen und zurückzucken“.
+- **TOUCH** muss den Hebel berühren, darf ihn aber **nicht umlegen**.
 - **DECKEL** ist die erste Berührung des Deckels von innen.
 - **PUSH** ist der Punkt, an dem der Schalter sicher umkippt, plus 1–2 Schritte.
 
-Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
+Mit `l` die Liste ansehen, mit `n1` … `n4` oder `r` einzelne Aktionen testen.
 
 ### Kalibrierfahrt nach dem Einschalten
 
-Die **erste Aktion nach dem Einschalten** ist eine Kalibrierfahrt, keine Persönlichkeit:
+Die **erste Aktion nach dem Einschalten** ist eine Kalibrierfahrt, keine normale Aktion:
 
 1. Der Arm fährt zügig bis kurz vor den gespeicherten TOUCH-Punkt (15°).
 2. Dann fährt er langsam weiter, bis der Schalter umfällt.
@@ -352,7 +350,6 @@ Die Standardwerte stehen in `config.h` (`GLOBAL_TEMPO_PCT`, `GLOBAL_PAUSE_PCT`).
 | Klick-Geste bis zum Drücken (`KLICK_BUDGET_MS`) | 0,45 s |
 | Klick selbst (nie abgebrochen, bei Zeitnot mit Vollgas) | ≤ ~0,65 s |
 | Rückzug inkl. Ankunft in der Box (`RETURN_MAX_MS`) | 1,0 s |
-| Nachgucken (`PEEK_ACTION_MAX_MS`) | 1,5 s |
 
 Vor jeder Phase schätzt die Engine die Dauer der Gesten und strafft sie bei Bedarf gleichmäßig: kürzere Pausen, schnellere Bewegungen. Reicht das nicht, bricht die Phase ab. Nach der Anfahrt wird dann sofort geklickt, beim Rückzug geht es mit Vollgas in die Box. Ein begonnener Klick wird nie abgebrochen, nur Klick-Wiederholungen können die 4 s überschreiten. Der serielle Monitor zeigt nach jeder Aktion `Dauer … ms`.
 
@@ -377,6 +374,5 @@ Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 | Nach dem Einschalten passiert gar nichts, Servo kraftlos | Noch keine Kalibrierung gespeichert → Abschnitt 8. |
 | Deckel bleibt offen stehen | Öffnungswinkel zu groß (≥ 90°) → Anschlag einbauen oder PUSH-Punkt/Armgeometrie ändern. |
 | Deckel hakt am Arm / Arm stockt beim Aufdrücken | Kontaktstelle glätten (Filz/PTFE), Deckel leichter machen, Kontaktpunkt weiter weg vom Scharnier. |
-| Gesten „in der Box“ sind nicht zu sehen | DECKEL-Punkt zu weit → neu setzen (`d`, `+`/`-`, `D`, `w`), er muss genau die erste Berührung des Deckels sein. |
 | Schalter kippt nur in die Mitte | Schalter ist ON-OFF-ON → ON-ON-Schalter verwenden. |
 | Micro-Servo wird heiß | Servo steht dauerhaft unter Last (Kalibrierung zu weit) oder ist ein Fake-„MG90S“ mit Plastikgetriebe. |

@@ -1,13 +1,13 @@
 /*
   =====================================================================
-   Useless Machine mit Charakter
+   Useless Machine
    ESP32-S3 SuperMini – Arduino-Core 2.x oder 3.x
 
    Dateien:
      config.h    – Pins, Verhalten, optionale Kalibrier-Vorgaben
      bytecode.h  – Mini-Skriptsprache (Opcodes + Makros)
      motion.h    – Schalter, Servo (LEDC), Bewegungs-Engine, Interpreter
-     scripts.h   – Gesten, Stimmungen, Persönlichkeiten
+     scripts.h   – die Aktionen: Anschleichen, Zack, Vorsichtig, Sauer
 
    Ein/Aus über den Hauptschalter der Box (kein Deep Sleep).
    Kalibrierung wird im ESP gespeichert (Preferences/NVS).
@@ -28,13 +28,10 @@ Motion M;
 
 uint8_t  annoy = 0;                 // 0..100 wie genervt die Maschine ist
 uint32_t totalRuns = 0;
-uint8_t  recent[5] = {255, 255, 255, 255, 255};
-uint8_t  recentPos = 0;
+uint8_t  lastAction = 255;          // zuletzt gewählte normale Aktion
 
 bool     haveLastRun = false;
 uint32_t lastRunEnd = 0;
-uint32_t peekAt = 0;
-bool     justPoweredOn = true;      // erste Vorstellung nach dem Einschalten: oft verschlafen
 bool     blockedUntilOff = false;   // nach fehlgeschlagenem Klick: erst wieder, wenn Schalter aus
 bool     calibration = false;       // Kalibriermodus: Schalter wird ignoriert
 bool     calibrated = false;        // gültige Kalibrierung vorhanden
@@ -42,88 +39,29 @@ bool     pendingRetrigger = false;
 bool     firstRunPending = CALIBRATE_ON_FIRST_RUN;  // nächste echte Aktion = Kalibrierfahrt
 Calib    draft = {0, 0, 0, 0};      // Kalibrierung in Arbeit (0 = noch nicht gesetzt)
 
-// ---------------------------------------------------------------------
-//  Planung einer Vorstellung
-// ---------------------------------------------------------------------
-struct Plan {
-  const char* name;
-  uint8_t moodId;
-  Mood mood;
-  uint8_t r, a, n, k, z;
-};
-
 enum class Outcome : uint8_t { Done, UserUndid, Retrigger, PushFailed };
 
-static uint8_t pickOr(uint8_t v, uint8_t count) { return v == RND ? (uint8_t)random(count) : v; }
-static bool isGrumpy(uint8_t m) { return m == mAnnoyed || m == mAngry || m == mHectic; }
-
-static bool recentlyUsed(uint8_t idx) {
-  for (uint8_t i = 0; i < COUNT_OF(recent); i++)
-    if (recent[i] == idx) return true;
-  return false;
+// ---------------------------------------------------------------------
+//  Auswahl und Laune
+// ---------------------------------------------------------------------
+// Genervt oder während des Rückzugs wieder eingeschaltet -> sauer.
+// Sonst zufällig, aber nie zweimal dieselbe Aktion hintereinander.
+static const Action& chooseAction(bool retrigger) {
+  if (retrigger || annoy >= ANNOY_GRUMPY_LEVEL) return ANGRY_ACTION;
+  uint8_t i = random(ACTION_COUNT);
+  if (ACTION_COUNT > 1 && i == lastAction) i = (i + 1 + random(ACTION_COUNT - 1)) % ACTION_COUNT;
+  lastAction = i;
+  return ACTIONS[i];
 }
 
-static int pickPersona(bool grumpy) {
-  for (int tries = 0; tries < 60; tries++) {
-    int i = random(PERSONA_COUNT);
-    if (recentlyUsed(i)) continue;
-    if (grumpy && tries < 45 && !(PERSONAS[i].mood != RND && isGrumpy(PERSONAS[i].mood))) continue;
-    return i;
-  }
-  return random(PERSONA_COUNT);
-}
-
-static Plan planFromPersona(int i) {
-  const Persona& ps = PERSONAS[i];
-  Plan p;
-  p.name = ps.name;
-  p.moodId = pickOr(ps.mood, MOOD_COUNT);
-  p.r = pickOr(ps.react, R_COUNT);
-  p.a = pickOr(ps.approach, A_COUNT);
-  p.n = pickOr(ps.nearG, N_COUNT);
-  p.k = pickOr(ps.klick, K_COUNT);
-  p.z = pickOr(ps.back, Z_COUNT);
-  p.mood = MOODS[p.moodId];
-  recent[recentPos] = i;
-  recentPos = (recentPos + 1) % COUNT_OF(recent);
-  return p;
-}
-
-static Plan planFreestyle() {
-  Plan p;
-  p.name = "Freestyle";
-  p.moodId = random(MOOD_COUNT);
-  p.r = random(R_COUNT);
-  p.a = random(A_COUNT);
-  p.n = random(N_COUNT);
-  p.k = random(K_COUNT);
-  p.z = random(Z_COUNT);
-  p.mood = MOODS[p.moodId];
-  return p;
-}
-
-static Plan choosePlan(bool retrigger) {
-  bool grumpy = annoy >= ANNOY_GRUMPY_LEVEL || (retrigger && annoy >= ANNOY_GRUMPY_LEVEL / 2);
-  if (grumpy || random(100) < PERSONA_CHANCE_PCT) return planFromPersona(pickPersona(grumpy));
-  return planFreestyle();
-}
-
-// Tagesform: frisch eingeschaltet, genervt, erneut eingeschaltet ...
-static void applyDynamics(Plan& p, bool retrigger) {
-  if (justPoweredOn && !retrigger && random(100) < 50) {
-    p.moodId = mTired;
-    p.mood = MOODS[mTired];
-    p.r = rWakeup;
-  }
-  if (annoy > 0) {
-    int tempo = p.mood.tempo + annoy / 2;
-    int patience = p.mood.patience * (100 - annoy / 2) / 100;
-    int nerves = p.mood.nerves + annoy / 3;
-    p.mood.tempo = tempo > 255 ? 255 : tempo;
-    p.mood.patience = patience < 20 ? 20 : patience;
-    p.mood.nerves = nerves > 255 ? 255 : nerves;
-  }
-  if (retrigger) p.r = random(100) < 70 ? rInstant : rStartle;
+// Je genervter, desto schneller und ungeduldiger
+static Mood moodFor(const Action& a) {
+  Mood m = MOODS[a.mood];
+  int tempo = m.tempo + annoy / 2;
+  int patience = m.patience * (100 - annoy / 2) / 100;
+  m.tempo = tempo > 255 ? 255 : tempo;
+  m.patience = patience < 20 ? 20 : patience;
+  return m;
 }
 
 static void updateAnnoyance(bool retrigger) {
@@ -144,7 +82,7 @@ static void updateAnnoyance(bool retrigger) {
 }
 
 // ---------------------------------------------------------------------
-//  Eine Vorstellung
+//  Eine Aktion
 // ---------------------------------------------------------------------
 // Skript mit harter Zeitgrenze (inkl. Ankunft in HOME) ausführen, danach mit
 // Vollgas nach HOME. false = Guard hat ausgelöst (Schalter wieder an).
@@ -164,46 +102,43 @@ static bool timedScript(const uint8_t* script, Guard guard, uint32_t maxMs) {
   return M.moveTo(0, 1e6f, E_LIN);
 }
 
-static Outcome perform(const Plan& p, bool test) {
-  Serial.printf("[#%lu] %-20s | %-11s | R%u A%u N%u K%u Z%u | genervt %u%%\n", (unsigned long)totalRuns, p.name,
-                p.mood.name, p.r, p.a, p.n, p.k, p.z, annoy);
+static Outcome perform(const Action& a, bool test) {
+  Serial.printf("[#%lu] %-24s | genervt %u%%\n", (unsigned long)totalRuns, a.name, annoy);
 
   M.servo.attach();
-  M.mood = p.mood;
+  M.mood = moodFor(a);
   M.pushFailed = false;
-  M.testMode = test;
-
   M.pushed = false;
+  M.testMode = test;
   const uint32_t t0 = millis();
 
-  // 1-3: Reaktion, Anfahrt, Theater – zusammen höchstens PRE_BUDGET_MS.
-  //      Macht der Mensch den Schalter selbst aus -> abbrechen.
+  // 1: Anfahrt – höchstens PRE_BUDGET_MS. Macht der Mensch den Schalter selbst aus -> zurück.
   M.setGuard(test ? Guard::None : Guard::AbortIfOff);
-  const uint8_t* pre[] = {REACT[p.r], APPROACH[p.a], NEARG[p.n]};
-  M.fitToBudget(pre, 3, PRE_BUDGET_MS);
+  const uint8_t* pre[] = {a.approach};
+  M.fitToBudget(pre, 1, PRE_BUDGET_MS);
   M.setDeadline(t0 + PRE_BUDGET_MS);
-  bool preOk = M.run(pre[0]) && M.run(pre[1]) && M.run(pre[2]);
+  bool preOk = M.run(a.approach);
   bool userUndid = !preOk && !M.timedOut;
   M.setDeadline(0);
   if (userUndid) {
     Serial.println(F("  -> Nanu? Schalter ist schon aus."));
-    return timedScript(G_CONFUSED, Guard::AbortIfOn, RETURN_MAX_MS) ? Outcome::UserUndid : Outcome::Retrigger;
+    return timedScript(G_UNDO, Guard::AbortIfOn, RETURN_MAX_MS) ? Outcome::UserUndid : Outcome::Retrigger;
   }
 
-  // 4: Klick-Geste – höchstens KLICK_BUDGET_MS; ein begonnener Klick läuft immer zu Ende
+  // 2: Klick – höchstens KLICK_BUDGET_MS; ein begonnener Klick läuft immer zu Ende
   M.setGuard(Guard::None);
-  const uint8_t* klick[] = {KLICK[p.k]};
+  const uint8_t* klick[] = {a.klick};
   M.fitToBudget(klick, 1, KLICK_BUDGET_MS);
   M.setDeadline(t0 + PRE_BUDGET_MS + KLICK_BUDGET_MS);
-  M.run(klick[0]);
+  M.run(a.klick);
   M.setDeadline(0);
   M.timeScale = 1.0f;
-  if (!M.pushed) M.push(1e6f, E_LIN);  // Zeit war um, bevor die Geste drücken konnte
+  if (!M.pushed) M.push(1e6f, E_LIN);  // Zeit war um, bevor gedrückt wurde
   bool failed = M.pushFailed;
   if (failed) Serial.println(F("  !! Schalter ließ sich nicht umlegen -> PUSH neu kalibrieren (P, w) / Mechanik prüfen"));
 
-  // 5: Rückzug – höchstens RETURN_MAX_MS. Schaltet der Mensch wieder ein -> sofort neue Vorstellung.
-  bool ok = timedScript(ZURUECK[p.z], (test || failed) ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS);
+  // 3: Zurück – höchstens RETURN_MAX_MS. Schaltet der Mensch wieder ein -> sofort nochmal, sauer.
+  bool ok = timedScript(a.back, (test || failed) ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS);
   M.setGuard(Guard::None);
   M.testMode = false;
   Serial.printf("  Dauer %lu ms | Ende: pos %.0f %% = %.0f µs (HOME %u)%s\n", (unsigned long)(millis() - t0), M.pos,
@@ -214,7 +149,8 @@ static Outcome perform(const Plan& p, bool test) {
 
 static void firstRunCalibration();
 
-static void handleTrigger(bool test = false, int forcedPersona = -1) {
+// forced: -1 = automatisch, 0..ACTION_COUNT-1 = diese Aktion, ACTION_COUNT = sauer
+static void handleTrigger(bool test = false, int forced = -1) {
   if (firstRunPending && !test) {
     firstRunPending = false;
     totalRuns++;
@@ -227,13 +163,13 @@ static void handleTrigger(bool test = false, int forcedPersona = -1) {
   pendingRetrigger = false;
   do {
     updateAnnoyance(retrig);
-    Plan p = forcedPersona >= 0 ? planFromPersona(forcedPersona) : choosePlan(retrig);
-    forcedPersona = -1;
-    applyDynamics(p, retrig);
-    justPoweredOn = false;
+    const Action& a = forced >= (int)ACTION_COUNT ? ANGRY_ACTION
+                      : forced >= 0              ? ACTIONS[forced]
+                                                 : chooseAction(retrig);
+    forced = -1;
     totalRuns++;
 
-    Outcome o = perform(p, test);
+    Outcome o = perform(a, test);
 
     lastRunEnd = millis();
     haveLastRun = true;
@@ -244,7 +180,6 @@ static void handleTrigger(bool test = false, int forcedPersona = -1) {
 
   M.testMode = false;
   M.setGuard(Guard::None);
-  peekAt = (random(100) < PEEK_CHANCE_PCT) ? millis() + random(PEEK_MIN_MS, PEEK_MAX_MS) : 0;
 }
 
 // ---------------------------------------------------------------------
@@ -459,7 +394,7 @@ static void firstRunCalibration() {
 
   bool failed = M.pushFailed;
   if (failed) blockedUntilOff = true;
-  if (!timedScript(ZURUECK[zCalm], failed ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS)) pendingRetrigger = true;
+  if (!timedScript(Z_NORMAL, failed ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS)) pendingRetrigger = true;
   M.setGuard(Guard::None);
   Serial.printf("  Dauer %lu ms | Ende: pos %.0f %% = %.0f µs\n", (unsigned long)(millis() - t0), M.pos,
                 M.servo.us());
@@ -485,10 +420,10 @@ static void printHelp() {
       "  h d t    langsam zu HOME / DECKEL / TOUCH\n"
       "  p        echter Klick-Test mit Vollgas (Schalter vorher AN)\n"
       "  g42      langsam zu Position 42 %\n"
-      "  r / n7   Testlauf zufällig / Persönlichkeit Nr. 7\n"
-      "  l        Persönlichkeiten auflisten\n"
+      "  r / n1   Testlauf zufällig / Aktion Nr. 1\n"
+      "  l        Aktionen auflisten\n"
       "  s        Status\n"
-      "Länge der Vorstellungen (wird sofort gespeichert):\n"
+      "Länge der Aktionen (wird sofort gespeichert):\n"
       "  v130     Tempo aller Bewegungen in % (50..300)\n"
       "  k60      Länge aller Pausen in % (10..200)\n"));
 }
@@ -692,9 +627,9 @@ static void runCommand(char* cmd) {
       break;
     case 'n':
       if (!needCalibrated()) break;
-      if (arg < 0 || arg >= PERSONA_COUNT) { Serial.printf("0..%u\n", PERSONA_COUNT - 1); break; }
+      if (arg < 1 || arg > ACTION_COUNT + 1) { Serial.printf("1..%u (l zeigt die Liste)\n", ACTION_COUNT + 1); break; }
       goPos(0);
-      handleTrigger(true, arg);
+      handleTrigger(true, arg - 1);
       break;
     case 'v':
     case 'k':
@@ -706,7 +641,8 @@ static void runCommand(char* cmd) {
       Serial.printf("Tempo %u %% | Pausen %u %% (gespeichert)\n", M.tempoPct, M.pausePct);
       break;
     case 'l':
-      for (uint8_t i = 0; i < PERSONA_COUNT; i++) Serial.printf("  %2u  %s\n", i, PERSONAS[i].name);
+      for (uint8_t i = 0; i < ACTION_COUNT; i++) Serial.printf("  %u  %s\n", i + 1, ACTIONS[i].name);
+      Serial.printf("  %u  %s (kommt von selbst bei schnellem Schalten)\n", ACTION_COUNT + 1, ANGRY_ACTION.name);
       break;
     case 's':
       Serial.printf("Schalter %s | Servo %s | ", M.sw.isOn() ? "AN" : "aus", M.servo.isAttached() ? "an" : "aus");
@@ -714,8 +650,8 @@ static void runCommand(char* cmd) {
       Serial.printf("kalibriert %s | Kalibriermodus %s | genervt %u | Laeufe %lu\n", calibrated ? "ja" : "NEIN",
                     calibration ? "AN" : "aus", annoy, (unsigned long)totalRuns);
       Serial.printf("Tempo %u %% | Pausen %u %%\n", M.tempoPct, M.pausePct);
-      if (calibrated) printCalib("Gespeichert:", calib);
-      printCalib("Entwurf:    ", draft);
+      if (calibrated) printCalib("Aktiv:  ", calib);
+      printCalib("Entwurf:", draft);
       break;
     default: Serial.println(F("? für Hilfe")); break;
   }
@@ -767,8 +703,8 @@ void setup() {
     calibration = true;
   }
 
-  Serial.printf("\nUseless Machine bereit (%s). %u Persönlichkeiten. '?' für Hilfe.\n",
-                CONFIG_IDF_TARGET, PERSONA_COUNT);
+  Serial.printf("\nUseless Machine bereit (%s). %u Aktionen + sauer. '?' für Hilfe.\n", CONFIG_IDF_TARGET,
+                ACTION_COUNT);
   if (calibrated) {
     printCalib("Kalibrierung:", calib);
   } else {
@@ -788,15 +724,6 @@ void loop() {
   } else if (on) {
     handleTrigger();
     return;
-  }
-
-  // Später nochmal aus der Box linsen
-  if (peekAt && !on && millis() >= peekAt) {
-    peekAt = 0;
-    M.servo.attach();
-    M.mood = MOODS[random(MOOD_COUNT)];
-    if (!timedScript(G_PEEK, Guard::AbortIfOn, PEEK_ACTION_MAX_MS)) pendingRetrigger = true;  // erwischt!
-    M.setGuard(Guard::None);
   }
 
   // Ruhender Arm: PWM aus -> kein Brummen, weniger Strom

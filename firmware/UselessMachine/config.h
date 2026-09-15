@@ -116,22 +116,17 @@
 #define PRE_BUDGET_MS       1900  // Reaktion + Anfahrt + Theater
 #define KLICK_BUDGET_MS      450  // Klick-Geste bis zum Drücken
 #define RETURN_MAX_MS       1000  // Rückzug inkl. Ankunft in HOME
-#define PEEK_ACTION_MAX_MS  1500  // spontanes Nachgucken
 
 // ---------------------------------------------------------------------
 //  CHARAKTER
 // ---------------------------------------------------------------------
-#define PERSONA_CHANCE_PCT   70     // Rest: freie Zufallskombination ("Freestyle")
 
 // Gesamtlänge der Vorstellungen. Auch im seriellen Monitor änderbar ('v', 'k'),
 // dort gesetzte Werte werden gespeichert und haben Vorrang.
 #define GLOBAL_TEMPO_PCT    130     // alle Bewegungen schneller (100 = wie programmiert)
 #define GLOBAL_PAUSE_PCT     60     // alle Pausen und Zitterzeiten kürzer (100 = wie programmiert)
 #define ANNOY_WINDOW_MS      8000   // erneutes Einschalten innerhalb dieser Zeit nervt
-#define ANNOY_STEP           25
+#define ANNOY_STEP           35     // 2. schnelles Umschalten -> sauer (ab ANNOY_GRUMPY_LEVEL)
 #define ANNOY_RETRIGGER_STEP 35     // Schalter wieder an, während der Arm noch zurückfährt
 #define ANNOY_DECAY_PER_S    2
 #define ANNOY_GRUMPY_LEVEL   60
-#define PEEK_CHANCE_PCT      20     // nach einer Aktion später nochmal "nachgucken"
-#define PEEK_MIN_MS          4000
-#define PEEK_MAX_MS          15000
