@@ -145,6 +145,24 @@ static void updateAnnoyance(bool retrigger) {
 // ---------------------------------------------------------------------
 //  Eine Vorstellung
 // ---------------------------------------------------------------------
+// Skript mit harter Zeitgrenze (inkl. Ankunft in HOME) ausführen, danach mit
+// Vollgas nach HOME. false = Guard hat ausgelöst (Schalter wieder an).
+static bool timedScript(const uint8_t* script, Guard guard, uint32_t maxMs) {
+  const uint32_t start = millis();
+  const uint32_t homeMs = (uint32_t)(P_GESTURE_MAX / SERVO_MAX_SPEED_PCT_S * 1000.0f) + 40;
+  const uint32_t scriptMs = maxMs > homeMs ? maxMs - homeMs : 0;
+  M.setGuard(guard);
+  const uint8_t* s[] = {script};
+  M.fitToBudget(s, 1, scriptMs);
+  M.setDeadline(start + scriptMs);
+  bool ok = M.run(script);
+  bool aborted = !ok && !M.timedOut;
+  M.setDeadline(0);
+  M.timeScale = 1.0f;
+  if (aborted) return false;
+  return M.moveTo(0, 1e6f, E_LIN);
+}
+
 static Outcome perform(const Plan& p, bool test) {
   Serial.printf("[#%lu] %-20s | %-11s | R%u A%u N%u K%u Z%u | genervt %u%%\n", (unsigned long)totalRuns, p.name,
                 p.mood.name, p.r, p.a, p.n, p.k, p.z, annoy);
@@ -154,30 +172,41 @@ static Outcome perform(const Plan& p, bool test) {
   M.pushFailed = false;
   M.testMode = test;
 
-  // 1-3: Reaktion, Anfahrt, Theater. Macht der Mensch den Schalter selbst aus -> abbrechen.
+  M.pushed = false;
+  const uint32_t t0 = millis();
+
+  // 1-3: Reaktion, Anfahrt, Theater – zusammen höchstens PRE_BUDGET_MS.
+  //      Macht der Mensch den Schalter selbst aus -> abbrechen.
   M.setGuard(test ? Guard::None : Guard::AbortIfOff);
-  if (!(M.run(REACT[p.r]) && M.run(APPROACH[p.a]) && M.run(NEARG[p.n]))) {
+  const uint8_t* pre[] = {REACT[p.r], APPROACH[p.a], NEARG[p.n]};
+  M.fitToBudget(pre, 3, PRE_BUDGET_MS);
+  M.setDeadline(t0 + PRE_BUDGET_MS);
+  bool preOk = M.run(pre[0]) && M.run(pre[1]) && M.run(pre[2]);
+  bool userUndid = !preOk && !M.timedOut;
+  M.setDeadline(0);
+  if (userUndid) {
     Serial.println(F("  -> Nanu? Schalter ist schon aus."));
-    M.setGuard(Guard::AbortIfOn);
-    if (!M.run(G_CONFUSED) || !M.moveTo(0, M.speedOf(S_SLOW), E_SMOOTH)) return Outcome::Retrigger;
-    return Outcome::UserUndid;
+    return timedScript(G_CONFUSED, Guard::AbortIfOn, RETURN_MAX_MS) ? Outcome::UserUndid : Outcome::Retrigger;
   }
 
-  // 4: Klick – hier unterbricht nichts
+  // 4: Klick-Geste – höchstens KLICK_BUDGET_MS; ein begonnener Klick läuft immer zu Ende
   M.setGuard(Guard::None);
-  M.run(KLICK[p.k]);
-  if (M.sw.isOn() && !test && !M.pushFailed) {
-    Serial.println(F("  -> Schalter noch an: Sicherheits-Klick"));
-    M.push(1e6f, E_LIN);
-  }
+  const uint8_t* klick[] = {KLICK[p.k]};
+  M.fitToBudget(klick, 1, KLICK_BUDGET_MS);
+  M.setDeadline(t0 + PRE_BUDGET_MS + KLICK_BUDGET_MS);
+  M.run(klick[0]);
+  M.setDeadline(0);
+  M.timeScale = 1.0f;
+  if (!M.pushed) M.push(1e6f, E_LIN);  // Zeit war um, bevor die Geste drücken konnte
   bool failed = M.pushFailed;
   if (failed) Serial.println(F("  !! Schalter ließ sich nicht umlegen -> PUSH neu kalibrieren (P, w) / Mechanik prüfen"));
 
-  // 5: Rückzug. Schaltet der Mensch wieder ein -> sofort neue Vorstellung.
-  M.setGuard((test || failed) ? Guard::None : Guard::AbortIfOn);
-  if (!M.run(ZURUECK[p.z]) || !M.moveTo(0, M.speedOf(S_MED), E_SMOOTH)) return Outcome::Retrigger;
+  // 5: Rückzug – höchstens RETURN_MAX_MS. Schaltet der Mensch wieder ein -> sofort neue Vorstellung.
+  bool ok = timedScript(ZURUECK[p.z], (test || failed) ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS);
   M.setGuard(Guard::None);
   M.testMode = false;
+  Serial.printf("  Dauer %lu ms\n", (unsigned long)(millis() - t0));
+  if (!ok) return Outcome::Retrigger;
   return failed ? Outcome::PushFailed : Outcome::Done;
 }
 
@@ -669,8 +698,7 @@ void loop() {
     peekAt = 0;
     M.servo.attach();
     M.mood = MOODS[random(MOOD_COUNT)];
-    M.setGuard(Guard::AbortIfOn);
-    if (!M.run(G_PEEK)) pendingRetrigger = true;   // erwischt!
+    if (!timedScript(G_PEEK, Guard::AbortIfOn, PEEK_ACTION_MAX_MS)) pendingRetrigger = true;  // erwischt!
     M.setGuard(Guard::None);
   }
 

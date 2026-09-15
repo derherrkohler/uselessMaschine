@@ -92,6 +92,17 @@
 #define PUSH_WINDUP_POS    50   // Anlauf-Position (%) für den 2. und 3. Versuch
 
 // ---------------------------------------------------------------------
+//  ZEITBUDGET – harte Obergrenzen je Aktion
+//  Gesten werden vorab automatisch gestrafft (kürzere Pausen, schnellere
+//  Bewegungen); reicht das nicht, bricht die Phase ab.
+//  Ungünstigster Fall: PRE + KLICK + Klick selbst (≤ ~0,65 s) + RETURN ≈ 4 s
+// ---------------------------------------------------------------------
+#define PRE_BUDGET_MS       1900  // Reaktion + Anfahrt + Theater
+#define KLICK_BUDGET_MS      450  // Klick-Geste bis zum Drücken
+#define RETURN_MAX_MS       1000  // Rückzug inkl. Ankunft in HOME
+#define PEEK_ACTION_MAX_MS  1500  // spontanes Nachgucken
+
+// ---------------------------------------------------------------------
 //  CHARAKTER
 // ---------------------------------------------------------------------
 #define PERSONA_CHANCE_PCT   70     // Rest: freie Zufallskombination ("Freestyle")

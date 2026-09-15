@@ -113,6 +113,10 @@ class Motion {
   uint32_t lastMotion = 0;
   uint16_t tempoPct = GLOBAL_TEMPO_PCT;  // globaler Tempo-Faktor
   uint16_t pausePct = GLOBAL_PAUSE_PCT;  // globaler Pausen-Faktor
+  float timeScale = 1.0f;     // Zeitbudget: <1 = Pausen kürzer, Bewegungen schneller
+  uint32_t deadline = 0;      // 0 = keine Zeitgrenze, sonst millis()-Zeitpunkt
+  bool timedOut = false;      // letzter Abbruch kam vom Zeitbudget
+  bool pushed = false;        // in dieser Vorstellung wurde schon gedrückt
 
   void begin() {
     sw.begin();
@@ -140,6 +144,7 @@ class Motion {
       sw.update();
       if (guard_ == Guard::AbortIfOff && !sw.isOn()) return false;
       if (guard_ == Guard::AbortIfOn && sw.isOn()) return false;
+      if (deadline && millis() >= deadline) { timedOut = true; return false; }
       uint32_t el = millis() - start;
       if (el >= ms) return true;
       uint32_t rest = ms - el;
@@ -150,7 +155,7 @@ class Motion {
   // Mood-skalierte Geschwindigkeit aus Skriptwert
   float speedOf(uint8_t s) const {
     if (s >= S_MAX) return 1e6f;
-    float v = s * mood.tempo / 100.0f * tempoPct / 100.0f * rndf(0.85f, 1.15f);
+    float v = s * mood.tempo / 100.0f * tempoPct / 100.0f / timeScale * rndf(0.85f, 1.15f);
     return v < 3.0f ? 3.0f : v;
   }
 
@@ -230,6 +235,21 @@ class Motion {
   // Beim Drücken wird kurz über PUSH hinaus kommandiert (PUSH_OVERDRIVE_US): Der Servo
   // drückt proportional zur Abweichung, also kräftiger. Weitere Versuche mit Anlauf.
   bool push(float v, uint8_t ease) {
+    pushed = true;
+    const uint32_t saved = deadline;
+    if (saved) {
+      // Reicht die Restzeit nicht für einen langsamen Klick: mit Vollgas drücken
+      const uint32_t now = millis();
+      const float needMs = fabs(100.0f - pos) / (v > 0.0f ? v : 1.0f) * 1000.0f * peakFactor(ease);
+      if (now >= saved || needMs > (float)(saved - now)) v = 1e6f;
+    }
+    deadline = 0;  // ein begonnener Klick wird nie vom Zeitbudget abgebrochen
+    bool r = pushInner(v, ease);
+    deadline = saved;
+    return r;
+  }
+
+  bool pushInner(float v, uint8_t ease) {
     bool ok = false;
     if (!sw.isOn() && !testMode) {
       ok = true;  // schon aus (z. B. beim Heranfahren umgefallen)
@@ -294,7 +314,7 @@ class Motion {
           if (!wiggle(a[0], a[1], a[2])) return false;
           break;
         case OP_JITTER:
-          if (!jitter(a[0], a[1] * 20UL * pausePct / 100)) return false;
+          if (!jitter(a[0], (uint32_t)(a[1] * 20.0f * pausePct / 100.0f * timeScale))) return false;
           break;
         case OP_LOOP: {
           uint8_t n = rndRange(a[0], a[1]);
@@ -326,8 +346,96 @@ class Motion {
 
   static float rndf(float lo, float hi) { return lo + (hi - lo) * (random(10001) / 10000.0f); }
 
+  // ------------------------------------------------------------------
+  //  Zeitbudget: Dauer schätzen und Skripte passend straffen
+  // ------------------------------------------------------------------
+  void setDeadline(uint32_t atMs) {
+    deadline = atMs;
+    timedOut = false;
+  }
+
+  // timeScale so wählen, dass die Skripte (nacheinander, ab aktueller Position)
+  // voraussichtlich in budgetMs passen.
+  void fitToBudget(const uint8_t* const scripts[], uint8_t n, uint32_t budgetMs) {
+    timeScale = 1.0f;
+    for (uint8_t iter = 0; iter < 6; iter++) {
+      float p = pos, est = 0;
+      for (uint8_t i = 0; i < n; i++) est += estimate(scripts[i], p);
+      if (est <= budgetMs || est <= 0.0f) return;
+      timeScale *= 0.95f * budgetMs / est;
+      if (timeScale < 0.05f) { timeScale = 0.05f; return; }
+    }
+  }
+
+  // Geschätzte Dauer (ms) ohne Zufall: Mittelwerte, Schleifen mit mittlerer Anzahl,
+  // CHANCE-Befehle zählen immer (konservativ). simPos wird fortgeschrieben.
+  float estimate(const uint8_t* c, float& simPos) const {
+    struct Frame { uint16_t pc; uint8_t left; } stack[4];
+    uint8_t sp = 0;
+    uint16_t pc = 0;
+    float ms = 0;
+    const float waitF = mood.patience / 100.0f * pausePct / 100.0f * timeScale;
+    for (uint16_t steps = 0; steps < 2000; steps++) {
+      uint8_t op = c[pc];
+      if (op == OP_END || op >= OP__COUNT) break;
+      const uint8_t* a = c + pc + 1;
+      uint16_t next = pc + OP_LEN[op];
+      switch (op) {
+        case OP_MOVE: ms += estMove(simPos, a[0], a[1], a[2]); break;
+        case OP_MOVER: ms += estMove(simPos, (a[0] + a[1]) / 2.0f, a[2], a[3]); break;
+        case OP_REL: ms += estMove(simPos, simPos + (int8_t)a[0], a[1], a[2]); break;
+        case OP_WAIT: ms += (a[0] + a[1]) * 10.0f * waitF; break;
+        case OP_NAP: ms += (a[0] + a[1]) * 50.0f * waitF; break;
+        case OP_WIGGLE: {
+          float amp = constrain(a[0] * mood.nerves / 100.0f, 1.0f, 20.0f);
+          ms += estDist(amp * (4.0f * a[1] + 1.0f), a[2], E_SMOOTH) + 2.0f * (a[1] + 1) * MOTION_STEP_MS;
+          break;
+        }
+        case OP_JITTER: ms += a[1] * 20.0f * pausePct / 100.0f * timeScale + 20.0f; break;
+        case OP_LOOP: {
+          uint8_t n = (a[0] + a[1] + 1) / 2;
+          if (n == 0 || sp >= 4) next = skipInstr(c, pc);
+          else stack[sp++] = {next, n};
+          break;
+        }
+        case OP_NEXT:
+          if (sp) {
+            if (--stack[sp - 1].left) next = stack[sp - 1].pc;
+            else sp--;
+          }
+          break;
+        case OP_PUSH:
+          ms += estMove(simPos, 100, a[0], a[1], 100) + 150.0f;
+          ms += estMove(simPos, P_CLOSE, S_MAX, E_LIN);
+          break;
+        case OP_HOME: ms += estMove(simPos, 0, a[0], a[1]); break;
+        default: break;
+      }
+      pc = next;
+    }
+    return ms;
+  }
+
  private:
   Guard guard_ = Guard::None;
+
+  float estMove(float& simPos, float target, uint8_t s, uint8_t e, float maxPos = P_GESTURE_MAX) const {
+    target = constrain(target, 0.0f, maxPos);
+    float dist = fabs(target - simPos);
+    simPos = target;
+    return estDist(dist, s, e);
+  }
+  float estDist(float dist, uint8_t s, uint8_t e) const {
+    if (dist < 0.2f) return 0.0f;
+    float vmax = SERVO_MAX_SPEED_PCT_S;
+    bool limited = SPEED_LIMIT_PCT_S > 0.0f;
+    if (limited && SPEED_LIMIT_PCT_S < vmax) vmax = SPEED_LIMIT_PCT_S;
+    float v = s >= S_MAX ? 1e6f : s * mood.tempo / 100.0f * tempoPct / 100.0f / timeScale;
+    if (v >= vmax && !limited) return dist / SERVO_MAX_SPEED_PCT_S * 1000.0f + 10.0f;
+    if (v > vmax) v = vmax;
+    if (v < 3.0f) v = 3.0f;
+    return dist / v * 1000.0f * peakFactor(e) + MOTION_STEP_MS;
+  }
 
   static uint8_t rndRange(uint8_t lo, uint8_t hi) {
     if (hi < lo) { uint8_t t = lo; lo = hi; hi = t; }
@@ -335,7 +443,7 @@ class Motion {
   }
   float sloppy(uint8_t p) const { return p + (int)random(-(int)mood.sloppy, (int)mood.sloppy + 1); }
   uint32_t scaleWait(uint32_t ms) const {
-    return (uint32_t)(ms * mood.patience / 100.0f * pausePct / 100.0f * rndf(0.9f, 1.1f));
+    return (uint32_t)(ms * mood.patience / 100.0f * pausePct / 100.0f * timeScale * rndf(0.9f, 1.1f));
   }
 
   static float applyEase(float t, uint8_t e) {

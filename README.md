@@ -333,6 +333,18 @@ Zwei globale Regler wirken auf alle Gesten, der Charakter bleibt dabei erhalten.
 
 Die Standardwerte stehen in `config.h` (`GLOBAL_TEMPO_PCT`, `GLOBAL_PAUSE_PCT`).
 
+**Harte Zeitgrenzen** (`config.h`, Abschnitt ZEITBUDGET):
+
+| Phase | max. |
+|---|---|
+| Reaktion + Anfahrt + Theater (`PRE_BUDGET_MS`) | 1,9 s |
+| Klick-Geste bis zum Drücken (`KLICK_BUDGET_MS`) | 0,45 s |
+| Klick selbst (nie abgebrochen, bei Zeitnot mit Vollgas) | ≤ ~0,65 s |
+| Rückzug inkl. Ankunft in der Box (`RETURN_MAX_MS`) | 1,0 s |
+| Nachgucken (`PEEK_ACTION_MAX_MS`) | 1,5 s |
+
+Vor jeder Phase schätzt die Engine die Dauer der Gesten und strafft sie bei Bedarf gleichmäßig: kürzere Pausen, schnellere Bewegungen. Reicht das nicht, bricht die Phase ab. Nach der Anfahrt wird dann sofort geklickt, beim Rückzug geht es mit Vollgas in die Box. Ein begonnener Klick wird nie abgebrochen, nur Klick-Wiederholungen können die 4 s überschreiten. Der serielle Monitor zeigt nach jeder Aktion `Dauer … ms`.
+
 Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 
 ---
