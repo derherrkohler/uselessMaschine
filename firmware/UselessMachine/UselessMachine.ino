@@ -4,11 +4,12 @@
    ESP32-C3 SuperMini / ESP32-S3 SuperMini – Arduino-Core 2.x oder 3.x
 
    Dateien:
-     config.h    – Pins, Servo-Kalibrierung, Verhalten, Deep Sleep
+     config.h    – Pins, Servo-Kalibrierung, Verhalten
      bytecode.h  – Mini-Skriptsprache (Opcodes + Makros)
      motion.h    – Schalter, Servo (LEDC), Bewegungs-Engine, Interpreter
-     scripts.h   – Gesten, Stimmungen, 50 Persönlichkeiten
+     scripts.h   – Gesten, Stimmungen, Persönlichkeiten
 
+   Ein/Aus über den Hauptschalter der Box (kein Deep Sleep).
    Serieller Monitor (115200 Baud, "Neue Zeile"): '?' zeigt die Befehle.
   =====================================================================
 */
@@ -17,27 +18,19 @@
 #include "motion.h"
 #include "scripts.h"
 
-#include <esp_sleep.h>
 #include <esp_system.h>
-#include <driver/gpio.h>
-#include <soc/soc_caps.h>
-#if SOC_PM_SUPPORT_EXT0_WAKEUP
-  #include <driver/rtc_io.h>
-#endif
 
 Motion M;
 
-// Überlebt Deep Sleep (nicht aber Stromlos/Reset)
-RTC_DATA_ATTR uint8_t  annoy = 0;          // 0..100 wie genervt die Maschine ist
-RTC_DATA_ATTR uint32_t totalRuns = 0;
-RTC_DATA_ATTR uint8_t  recent[5] = {255, 255, 255, 255, 255};
-RTC_DATA_ATTR uint8_t  recentPos = 0;
+uint8_t  annoy = 0;                 // 0..100 wie genervt die Maschine ist
+uint32_t totalRuns = 0;
+uint8_t  recent[5] = {255, 255, 255, 255, 255};
+uint8_t  recentPos = 0;
 
 bool     haveLastRun = false;
 uint32_t lastRunEnd = 0;
-uint32_t lastActivity = 0;
 uint32_t peekAt = 0;
-bool     justWoke = false;
+bool     justPoweredOn = true;      // erste Vorstellung nach dem Einschalten: oft verschlafen
 bool     blockedUntilOff = false;   // nach fehlgeschlagenem Klick: erst wieder, wenn Schalter aus
 bool     calibration = false;
 bool     pendingRetrigger = false;
@@ -108,9 +101,9 @@ static Plan choosePlan(bool retrigger) {
   return planFreestyle();
 }
 
-// Tagesform: frisch aufgewacht, genervt, erneut eingeschaltet ...
+// Tagesform: frisch eingeschaltet, genervt, erneut eingeschaltet ...
 static void applyDynamics(Plan& p, bool retrigger) {
-  if (justWoke && !retrigger && random(100) < 50) {
+  if (justPoweredOn && !retrigger && random(100) < 50) {
     p.moodId = mTired;
     p.mood = MOODS[mTired];
     p.r = rWakeup;
@@ -190,14 +183,13 @@ static void handleTrigger(bool test = false, int forcedPersona = -1) {
     Plan p = forcedPersona >= 0 ? planFromPersona(forcedPersona) : choosePlan(retrig);
     forcedPersona = -1;
     applyDynamics(p, retrig);
-    justWoke = false;
+    justPoweredOn = false;
     totalRuns++;
 
     Outcome o = perform(p, test);
 
     lastRunEnd = millis();
     haveLastRun = true;
-    lastActivity = lastRunEnd;
     retrig = (o == Outcome::Retrigger);
     if (retrig) Serial.println(F("  -> Schon wieder?!"));
     if (o == Outcome::PushFailed) blockedUntilOff = true;
@@ -222,49 +214,12 @@ static void rgbLedOff() {
 #endif
 
 // ---------------------------------------------------------------------
-//  Deep Sleep
-// ---------------------------------------------------------------------
-static void goToSleep() {
-  if (!esp_sleep_is_valid_wakeup_gpio((gpio_num_t)PIN_SWITCH)) {
-    Serial.println(F("[sleep] PIN_SWITCH kann nicht aus Deep Sleep wecken – Sleep deaktiviert."));
-    lastActivity = millis();
-    return;
-  }
-  Serial.println(F("[sleep] Gute Nacht. Wecken per Schalter."));
-  Serial.flush();
-
-  M.servo.detach();                      // Pin LOW -> keine Phantom-Pulse
-  gpio_hold_en((gpio_num_t)PIN_SERVO);   // GPIO4 ist RTC-GPIO: Hold gilt auch im Deep Sleep
-#ifdef PIN_RGB_LED
-  // Datenleitung fest auf LOW, sonst können Störimpulse die LED im Schlaf einschalten
-  pinMode(PIN_RGB_LED, OUTPUT);
-  digitalWrite(PIN_RGB_LED, LOW);
-  gpio_hold_en((gpio_num_t)PIN_RGB_LED);
-#endif
-#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
-  gpio_deep_sleep_hold_en();             // nötig, damit digitale GPIOs (z. B. 48) im Deep Sleep gehalten werden
-#endif
-
-#if SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP    // ESP32-C3
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << PIN_SWITCH,
-      SWITCH_ON_LEVEL == LOW ? ESP_GPIO_WAKEUP_GPIO_LOW : ESP_GPIO_WAKEUP_GPIO_HIGH);
-#elif SOC_PM_SUPPORT_EXT0_WAKEUP         // ESP32-S3
-  if (SWITCH_USE_INTERNAL_PULLUP) {
-    rtc_gpio_pullup_en((gpio_num_t)PIN_SWITCH);
-    rtc_gpio_pulldown_dis((gpio_num_t)PIN_SWITCH);
-  }
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_SWITCH, SWITCH_ON_LEVEL == LOW ? 0 : 1);
-#endif
-  esp_deep_sleep_start();
-}
-
-// ---------------------------------------------------------------------
 //  Serielle Befehle (Kalibrierung & Test)
 // ---------------------------------------------------------------------
 static void printHelp() {
   Serial.println(F(
       "\nBefehle:\n"
-      "  c        Kalibriermodus an/aus (Schalter & Sleep ignoriert)\n"
+      "  c        Kalibriermodus an/aus (Schalter wird ignoriert)\n"
       "  u1500    Servo direkt auf 1500 µs (aktiviert Kalibriermodus)\n"
       "  + / -    +/-10 µs  (z. B. +25)\n"
       "  h d t p  fahre zu HOME / DECKEL / TOUCH / PUSH (kalibrierte Werte)\n"
@@ -284,7 +239,6 @@ static void goPos(float target) {
 }
 
 static void runCommand(char* cmd) {
-  lastActivity = millis();
   int arg = atoi(cmd + 1);
   switch (cmd[0]) {
     case '?': printHelp(); break;
@@ -345,40 +299,21 @@ static void handleSerial() {
 
 // ---------------------------------------------------------------------
 void setup() {
-  // Servo-Pin so früh wie möglich definiert auf LOW (gegen Zucken).
-  // Erst Pegel setzen, dann den Deep-Sleep-Hold lösen.
+  // Servo-Pin so früh wie möglich definiert auf LOW (gegen Zucken)
   pinMode(PIN_SERVO, OUTPUT);
   digitalWrite(PIN_SERVO, LOW);
-#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
-  gpio_deep_sleep_hold_dis();
-#endif
-  gpio_hold_dis((gpio_num_t)PIN_SERVO);
 #ifdef PIN_RGB_LED
-  gpio_hold_dis((gpio_num_t)PIN_RGB_LED);
   rgbLedOff();
-#endif
-#if SOC_PM_SUPPORT_EXT0_WAKEUP
-  rtc_gpio_deinit((gpio_num_t)PIN_SWITCH);  // nach ext0-Wakeup wieder normaler GPIO
 #endif
 
   Serial.begin(115200);
 
-  esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
-  justWoke = (wake == ESP_SLEEP_WAKEUP_GPIO || wake == ESP_SLEEP_WAKEUP_EXT0);
-  if (!justWoke) {
-    annoy = 0;
-  } else {
-    annoy /= 2;  // Schlaf beruhigt
-  }
   if (esp_reset_reason() == ESP_RST_BROWNOUT) {
     Serial.println(F("!! BROWNOUT-Reset: Versorgung bricht beim Servo-Anlauf ein. "
-                     "Elko/Diode/Batterien prüfen oder SPEED_LIMIT_PCT_S setzen."));
+                     "Elko/Batterien prüfen oder SPEED_LIMIT_PCT_S setzen."));
   }
 
-  if (justWoke) Serial.println(F("[wake] vom Schalter geweckt"));
-
   M.begin();
-  lastActivity = millis();
 
   Serial.printf("\nUseless Machine bereit (%s). %u Persönlichkeiten. '?' für Hilfe.\n",
                 CONFIG_IDF_TARGET, PERSONA_COUNT);
@@ -406,17 +341,12 @@ void loop() {
     M.setGuard(Guard::AbortIfOn);
     if (!M.run(G_PEEK)) pendingRetrigger = true;   // erwischt!
     M.setGuard(Guard::None);
-    lastActivity = millis();
   }
 
   // Ruhender Arm: PWM aus -> kein Brummen, weniger Strom
   if (M.servo.isAttached() && M.pos < 0.5f && millis() - M.lastMotion > SERVO_DETACH_IDLE_MS) {
     M.servo.detach();
   }
-
-#if ENABLE_DEEP_SLEEP
-  if (!on && !blockedUntilOff && !peekAt && millis() - lastActivity > IDLE_SLEEP_MS) goToSleep();
-#endif
 
   delay(5);
 }

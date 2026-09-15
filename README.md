@@ -32,7 +32,7 @@ Das Ganze passiert jedes Mal ein bisschen anders: mal zögerlich, mal hektisch, 
 
  ESP32 GPIO4 ───[R1 330 Ω]───────────────► Servo Signal (orange/gelb)
       │
-      └──[R2 10 kΩ]── GND        (Pull-down: Servo zuckt nicht beim Booten/Schlafen)
+      └──[R2 10 kΩ]── GND        (Pull-down: Servo zuckt nicht beim Einschalten)
 
  ESP32 3V3 ───[R3 10 kΩ]───┬─────────────► ESP32 GPIO5
                            │
@@ -54,7 +54,7 @@ Stückliste zusätzlich zu Board, Servo, Batteriehalter und Schalter:
 | C3 | 100–220 µF, ≥ 10 V | Stützpuffer für den ESP hinter der Diode |
 | R1 | 220–470 Ω | Schutz des GPIO (Servo-Rückwirkung, Kurzschluss) |
 | R2 | 10 kΩ | definiertes LOW auf der Signalleitung |
-| R3 | 10 kΩ | externer Pull-up für den Schalter (Deep Sleep ist damit zuverlässig) |
+| R3 | 10 kΩ | **optional**: externer Pull-up für den Schalter, nur bei Störungen nötig (der interne Pull-up ist aktiv) |
 
 Verdrahtungs-Regeln:
 1. **Minus aller Teile an einem Punkt** (Sternpunkt am Batterie-Minus). Der Servo-Masse-Strom soll nicht über das ESP-Board fließen.
@@ -73,10 +73,10 @@ Verdrahtungs-Regeln:
 | Funktion | GPIO | Warum |
 |---|---|---|
 | Servo-Signal | **GPIO 4** | kein Strapping-Pin, frei |
-| Schalter | **GPIO 5** | kein Strapping-Pin. **Nur GPIO 0–5 können den C3 aus Deep Sleep wecken!** |
+| Schalter | **GPIO 5** | kein Strapping-Pin |
 | Versorgung | **5V**-Pin (über D1), **G** | |
 
-Alternativen: Servo auf 3, 6, 7 oder 10; Schalter auf 0–3 (wegen Deep Sleep).
+Alternativen für Servo oder Schalter: GPIO 0, 1, 3, 6, 7, 10.
 **Meiden:**
 - GPIO 2, 8, 9: Strapping-Pins. 8 ist meist die blaue LED, 9 der BOOT-Taster. Falscher Pegel beim Start heißt: Board bootet nicht.
 - GPIO 18/19: USB D−/D+.
@@ -89,10 +89,10 @@ Alternativen: Servo auf 3, 6, 7 oder 10; Schalter auf 0–3 (wegen Deep Sleep).
 | Funktion | GPIO | Warum |
 |---|---|---|
 | Servo-Signal | **GPIO 4** | frei, kein Strapping |
-| Schalter | **GPIO 5** | RTC-GPIO, kann aus Deep Sleep wecken |
+| Schalter | **GPIO 5** | frei, kein Strapping |
 | Versorgung | **5V**-Pin (über D1), **G** | |
 
-Alternativen: GPIO 1, 2, 6–13 (alle RTC-fähig, 0–21).
+Alternativen: GPIO 1, 2, 6–13.
 **Meiden:**
 - GPIO 0 (BOOT), 3, 45, 46: Strapping-Pins.
 - GPIO 19/20: USB.
@@ -157,33 +157,22 @@ Ein Kippschalter mit 3 Pins ist ein Umschalter (SPDT). Der **mittlere Pin (COM)*
 - Nimm den äußeren Pin, der verbunden ist, wenn der Hebel in der **„AN“-Stellung** steht (also der Stellung, aus der der Arm ihn zurückdrückt). Prüfen mit Multimeter (Durchgang) oder Befehl `s` im seriellen Monitor. Ist es falsch herum: einfach den anderen äußeren Pin nehmen.
 - **Wichtig:** Der Schalter muss **ON-ON** sein (2 Stellungen). Ein **ON-OFF-ON** mit Mittelstellung funktioniert nicht, weil der Arm den Hebel sonst nur in die Mitte drückt.
 - Schalter „aus“ = offen. So fließt in Ruhe **kein Strom** durch den Pull-up.
-- Interner Pull-up ist im Code aktiv. Der externe 10 kΩ (R3) macht das Signal robuster und ist für Deep Sleep empfohlen.
+- Der interne Pull-up ist im Code aktiv und genügt. Nur wenn der Schalter von selbst auslöst (lange Leitungen neben dem Servokabel): 10 kΩ (R3) nach 3V3 und/oder 100 nF (C5) nach GND nachrüsten.
 
-#### Weckt ein Schalter mit internem Pull-up den S3 wirklich auf?
+Die Onboard-RGB-LED (GPIO 48) wird beim Start ausgeschaltet. Auch ausgeschaltet zieht eine WS2812 noch ca. 0,5–1 mA. Das lässt sich nur durch Ablöten vermeiden.
 
-Ja, auf dem ESP32-S3 mit **ext0-Wakeup** klappt das. Es hängt aber an einem Detail:
+### Ein/Aus und Batterielaufzeit (grobe Werte)
 
-- Im Deep Sleep sind die normalen digitalen GPIO-Funktionen abgeschaltet. Ein nur per `pinMode(INPUT_PULLUP)` gesetzter Pull-up ist dort **nicht** zuverlässig.
-- Die Firmware schaltet vor dem Einschlafen deshalb den **RTC-Pull-up** ein (`rtc_gpio_pullup_en`). Den gibt es nur an RTC-fähigen Pins (S3: GPIO 0–21, also auch GPIO 5).
-- ext0 überwacht den Pin mit der RTC-Peripherie. Das IDF lässt diese Peripherie im Schlaf eingeschaltet, sobald ext0 aktiv ist. Pull-up und Pegelüberwachung laufen also weiter.
-- ext0 reagiert auf den **Pegel**, nicht auf eine Flanke. Ist der Schalter beim Einschlafen schon AN, wacht der Chip sofort wieder auf. Die Firmware schläft deshalb nur bei ausgeschaltetem Schalter.
-- Der interne Pull-up ist schwach (ca. 45 kΩ). Bei langen Schalterleitungen neben den Servokabeln können Störungen den Chip fälschlich wecken. Dann den externen 10 kΩ (R3) nach 3V3 nachrüsten. Der kostet im Schlaf keinen Strom, weil der Schalter dann offen ist.
-- Nach dem Aufwachen gibt die Firmware den Pin mit `rtc_gpio_deinit` wieder als normalen GPIO frei und meldet `[wake] vom Schalter geweckt`. Die USB-Verbindung baut sich nach dem Aufwachen neu auf, frühe Meldungen können deshalb fehlen.
-
-Die Onboard-RGB-LED (GPIO 48) wird beim Start ausgeschaltet. Im Deep Sleep hält die Firmware ihre Datenleitung fest auf LOW, damit Störimpulse sie nicht einschalten. Auch ausgeschaltet zieht eine WS2812 noch ca. 0,5–1 mA. Das lässt sich nur durch Ablöten vermeiden.
-
-### Stromverbrauch und Batterielaufzeit (grobe Werte)
+Die Box wird über den **Hauptschalter** ein- und ausgeschaltet. Einen Tiefschlaf gibt es nicht, der ESP ist bei eingeschalteter Box immer wach.
 
 | Zustand | Strom |
 |---|---|
-| ESP32-C3 wach, ohne WLAN | ~20–25 mA |
 | ESP32-S3 wach, ohne WLAN | ~35–45 mA |
+| ESP32-C3 wach, ohne WLAN | ~20–25 mA |
 | Servo in Ruhe (ohne Pulse) | ~5–10 mA (typabhängig) |
-| Board-Power-LED | ~1–5 mA (je nach Board) |
-| ESP im Deep Sleep | < 0,1 mA |
+| Board-LEDs (Power/BAT, WS2812 aus) | ~1–5 mA |
 
-Die Firmware schickt dem Servo in Ruhe keine Pulse mehr und legt den ESP nach 45 s in **Deep Sleep**. Aufgeweckt wird er vom Schalter. Trotzdem ziehen **Servo-Ruhestrom und Power-LED** weiter Strom, grob 10 mA, also nur ca. 1 Woche mit 2000 mAh.
-Deshalb: **Einen Hauptschalter** unten in die Box einbauen. Wer monatelang Standby will: Power-LED ablöten und die Servo-Versorgung per MOSFET schaltbar machen.
+Eingeschaltet in Ruhe zieht die Box mit dem S3 also **~50 mA**. Mit 3× AA Alkaline (~2000 mAh) sind das grob **40 Stunden eingeschaltete Zeit**. Jede Aktion kostet zusätzlich nur wenig. **Nach dem Spielen den Hauptschalter ausmachen**, sonst sind die Batterien nach knapp 2 Tagen leer. Ausgeschaltet fließt kein Strom.
 
 ---
 
@@ -204,9 +193,9 @@ Für den ESP hinter der Diode: **100–220 µF + 100 nF** am 5V/GND-Pin des Boar
 ## 5. Softwarearchitektur
 
 ```
-UselessMachine.ino   Zustandsautomat, Auswahl der Persönlichkeit, "Launen", Serial, Deep Sleep
+UselessMachine.ino   Zustandsautomat, Auswahl der Persönlichkeit, "Launen", Serial
        │
-       ├── scripts.h    Daten: Gesten (Bytecode), 10 Stimmungen, 50 Persönlichkeiten
+       ├── scripts.h    Daten: Gesten (Bytecode), 10 Stimmungen, 53 Persönlichkeiten
        ├── motion.h     Engine: Schalter entprellen · Servo (LEDC, µs) · moveTo/wiggle/jitter/push · Interpreter
        ├── bytecode.h   Die Skriptsprache: Opcodes + Makros
        └── config.h     Pins, Kalibrierung, Verhalten
@@ -254,7 +243,7 @@ Schalter AN
   → R Reaktion  → A Anfahrt  → N Theater vor dem Schalter      [Mensch schaltet selbst aus? → "Nanu?"-Geste]
   → K Klick (mit Erfolgskontrolle)                               [klappt nicht? → Retry, dann Fehlerhinweis]
   → Z Rückzug                                                    [Mensch schaltet wieder an? → sofort nochmal, genervter]
-  → evtl. später "nachgucken" → PWM aus → nach 45 s Deep Sleep
+  → evtl. später "nachgucken" → PWM aus → warten auf den nächsten Schalter
 ```
 
 ---
@@ -271,7 +260,7 @@ Vier Schichten multiplizieren sich:
 4. **Gedächtnis und Laune**:
    - Wird die Maschine schnell hintereinander ausgelöst, steigt `annoy`. Ab 60 % kommen bevorzugt genervte, hektische oder wütende Charaktere, und alles wird schneller und ungeduldiger.
    - Wer während des Rückzugs wieder einschaltet, bekommt sofort eine gereizte Reaktion.
-   - Frisch aus dem Deep Sleep: mit 50 % Wahrscheinlichkeit verschlafen.
+   - Erste Aktion nach dem Einschalten der Box: mit 50 % Wahrscheinlichkeit verschlafen.
    - Die letzten 5 Persönlichkeiten werden nicht sofort wiederholt.
    - Dazu Zufall in **jedem** Tempo (±15 %), jeder Pause (±10 % plus Min/Max-Bereich) und jeder Zielposition.
 
@@ -328,7 +317,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/UselessMac
 
 1. **Arm noch nicht festschrauben** (Servohorn locker oder abgenommen).
 2. Flashen, seriellen Monitor öffnen (115200 Baud, Zeilenende „Neue Zeile“), `?` eingeben.
-3. `c` → Kalibriermodus (Schalter und Sleep werden ignoriert).
+3. `c` → Kalibriermodus (der Schalter wird ignoriert).
 4. `u1500` und dann mit `+` / `-` (oder `+50`) die Position suchen, in der der Arm **in der Box ruht** → Wert als `SERVO_US_HOME` notieren.
 5. Arm montieren. Mit `+`/`-` die Position suchen, in der der Arm den **Deckel von innen gerade berührt**, der Deckel aber noch zu ist → `SERVO_US_LID`.
 6. Weiter, bis der Arm den Hebel **gerade berührt, aber noch nicht umlegt** → `SERVO_US_TOUCH`.
@@ -350,7 +339,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/UselessMac
 | Schalter wird nicht umgelegt, Meldung „ließ sich nicht umlegen“ | `SERVO_US_PUSH` weiter, Hebelarm kürzer, Servo zu schwach oder Batterie leer. Die Maschine wartet dann, bis du den Schalter selbst ausmachst (kein Dauer-Blockieren). |
 | Die Maschine hält den Schalter für schon aus | Schaltlogik andersherum → anderen äußeren Kontakt nehmen oder `SWITCH_ON_LEVEL` auf `HIGH` (dann Pull-down statt Pull-up). |
 | Schalter löst zufällig aus | Störungen durch Servokabel → R3 + C5, Leitungen verdrillen und getrennt verlegen. |
-| Upload klappt nicht mehr, USB-Port weg | Das Board ist im Deep Sleep, oder GPIO-/USB-Pins sind blockiert → **BOOT halten, RESET tippen (oder USB einstecken), BOOT loslassen**, dann flashen. Zum Entwickeln `ENABLE_DEEP_SLEEP false`. |
+| Upload klappt nicht, kein USB-Port sichtbar | **BOOT halten, RESET tippen (oder USB einstecken), BOOT loslassen**, dann flashen. |
 | Keine Serial-Ausgabe (C3/S3) | „USB CDC On Boot: Enabled“ vergessen. |
 | Board bootet nicht, wenn der Schalter angeschlossen ist | Schalter hängt an einem Strapping-Pin (C3: 2/8/9, S3: 0/3/45/46) → anderen GPIO nehmen. |
 | Servo fährt „falschherum“ | kein Problem: `SERVO_US_HOME` darf größer als `SERVO_US_PUSH` sein. |

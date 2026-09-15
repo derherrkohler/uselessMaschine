@@ -12,10 +12,10 @@
 // ---------------------------------------------------------------------
 #if CONFIG_IDF_TARGET_ESP32C3
   #define PIN_SERVO   4   // PWM zum Servo (über 330 Ω)
-  #define PIN_SWITCH  5   // Kippschalter. Für Deep-Sleep-Wakeup MUSS es GPIO 0..5 sein!
+  #define PIN_SWITCH  5   // Kippschalter
 #elif CONFIG_IDF_TARGET_ESP32S3
   #define PIN_SERVO   4
-  #define PIN_SWITCH  5   // RTC-GPIO (0..21), weckt aus Deep Sleep
+  #define PIN_SWITCH  5
   #define PIN_RGB_LED 48  // WS2812 auf dem S3 SuperMini – wird dauerhaft ausgeschaltet.
                           // Zeile auskommentieren, falls dein Board dort keine LED hat.
 #else
@@ -25,7 +25,8 @@
 // ---------------------------------------------------------------------
 //  SCHALTER
 //  Standard: Schalter zieht den GPIO nach GND, wenn er "AN" ist.
-//  Tipp: externen 10 kΩ Pull-up nach 3V3 verwenden (robuster, Deep Sleep).
+//  Der interne Pull-up genügt. Bei Störungen (lange Kabel neben dem Servo):
+//  zusätzlich 10 kΩ nach 3V3 und/oder 100 nF nach GND.
 // ---------------------------------------------------------------------
 #define SWITCH_ON_LEVEL             LOW
 #define SWITCH_USE_INTERNAL_PULLUP  true
@@ -85,11 +86,3 @@
 #define PEEK_CHANCE_PCT      20     // nach einer Aktion später nochmal "nachgucken"
 #define PEEK_MIN_MS          4000
 #define PEEK_MAX_MS          15000
-
-// ---------------------------------------------------------------------
-//  STROMSPAREN
-//  Achtung: Nach dem Einschlafen verschwindet der USB-Port (C3/S3 native USB).
-//  Zum Flashen: BOOT gedrückt halten, RESET tippen (oder USB einstecken), BOOT loslassen.
-// ---------------------------------------------------------------------
-#define ENABLE_DEEP_SLEEP   true
-#define IDLE_SLEEP_MS       45000

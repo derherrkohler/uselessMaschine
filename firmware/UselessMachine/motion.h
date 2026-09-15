@@ -4,7 +4,6 @@
 // =====================================================================
 #include "config.h"
 #include "bytecode.h"
-#include <driver/gpio.h>
 
 // ---------------------------------------------------------------------
 //  Entprellter Schalter
@@ -42,7 +41,6 @@ class ServoOut {
  public:
   void attach() {
     if (attached_) return;
-    gpio_hold_dis((gpio_num_t)PIN_SERVO);
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
     ledcAttach(PIN_SERVO, 50, SERVO_PWM_BITS);
 #else
