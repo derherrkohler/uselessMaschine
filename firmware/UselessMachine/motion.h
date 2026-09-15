@@ -257,12 +257,25 @@ class Motion {
       const float dir = calib.push >= calib.touch ? 1.0f : -1.0f;
       for (uint8_t attempt = 0; attempt <= PUSH_RETRIES; attempt++) {
         if (attempt) {
-          Serial.printf("  [push] Schalter noch an – Versuch %u mit Anlauf\n", attempt + 1);
-          if (!moveTo(PUSH_WINDUP_POS - (attempt - 1) * PUSH_WINDUP_STEP, 1e6f, E_LIN)) return false;
+          Serial.printf("  [push] Schaff ich nicht – Versuch %u: schneller und weiter!\n", attempt + 1);
+          // weiter ausholen, aber nicht so weit, dass der Deckel zufällt
+          float windup = PUSH_WINDUP_POS - (attempt - 1) * PUSH_WINDUP_STEP;
+          if (windup < P_LID + 5) windup = P_LID + 5;
+          if (!moveTo(windup, 1e6f, E_LIN)) return false;
+          // kurz ärgern: schütteln, jedes Mal heftiger
+          const float amp = 3.0f + 2.0f * attempt;
+          for (uint8_t i = 0; i < PUSH_ANGRY_SHAKES; i++) {
+            if (!moveTo(windup + amp, 1e6f, E_LIN)) return false;
+            if (!moveTo(windup - amp, 1e6f, E_LIN)) return false;
+          }
+          if (!moveTo(windup, 1e6f, E_LIN)) return false;
           if (!waitMs(PUSH_WINDUP_PAUSE_MS)) return false;
         }
+        // erster Versuch im Tempo der Geste, danach immer Vollgas
         if (!moveTo(100, attempt ? 1e6f : v, attempt ? E_LIN : ease, 100)) return false;
-        servo.writeUs(posToUs(100) + dir * PUSH_OVERDRIVE_US * (attempt + 1));
+        float overdrive = PUSH_OVERDRIVE_US * (attempt + 1.0f);
+        if (overdrive > PUSH_OVERDRIVE_MAX_US) overdrive = PUSH_OVERDRIVE_MAX_US;
+        servo.writeUs(posToUs(100) + dir * overdrive);
         lastMotion = millis();
         uint32_t t0 = millis();
         while (millis() - t0 < PUSH_CONFIRM_MS && (sw.isOn() || testMode)) {
