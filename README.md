@@ -3,8 +3,8 @@
 Kippschalter an → ein Servo-Arm kommt aus der Box und legt den Schalter wieder um.
 Das Ganze passiert jedes Mal ein bisschen anders: mal zögerlich, mal hektisch, mal beleidigt.
 
-- Firmware: [`firmware/UselessMachine/`](firmware/UselessMachine/) (Arduino, ESP32-C3 **und** ESP32-S3 SuperMini)
-- Getestet: kompiliert mit arduino-esp32 **3.3.8** für `esp32c3` und `esp32s3`. Auf echter Hardware ist der Code **noch nicht** gelaufen. Die Kalibrierung (Abschnitt 8) ist Pflicht.
+- Firmware: [`firmware/UselessMachine/`](firmware/UselessMachine/) (Arduino, ESP32-S3 SuperMini)
+- Getestet: kompiliert mit arduino-esp32 **3.3.8** für `esp32s3`. Auf echter Hardware ist der Code **noch nicht** gelaufen. Die Kalibrierung (Abschnitt 8) ist Pflicht.
 
 **Diese Hardware ist eingeplant:** SG90-Servo · 3× AA Alkaline · Kippschalter mit 3 Anschlüssen · Deckel, den der Arm aufdrückt und der durch sein Gewicht wieder zufällt.
 
@@ -30,16 +30,16 @@ Das Ganze passiert jedes Mal ein bisschen anders: mal zögerlich, mal hektisch, 
                                                                                 Servo GND (braun/schwarz),
                                                                                 Schalter, C1−, C3−
 
- Servo-GPIO ───[R1 330 Ω]────────────────► Servo Signal (orange/gelb)     S3: GPIO 5 · C3: GPIO 4
+ ESP32 GPIO5 ───[R1 330 Ω]───────────────► Servo Signal (orange/gelb)
       │
       └──[R2 10 kΩ]── GND        (Pull-down: Servo zuckt nicht beim Einschalten)
 
- ESP32 3V3 ───[R3 10 kΩ]───┬─────────────► Schalter-GPIO                  S3: GPIO 4 · C3: GPIO 5
+ ESP32 3V3 ───[R3 10 kΩ]───┬─────────────► ESP32 GPIO4
                            │
                            ├── Kippschalter: äußerer Pin ─┐
                            │                 mittlerer Pin (COM) ── GND
                            │                 anderer äußerer Pin: frei
-                           │                               (Schalter "AN" = Schalter-GPIO auf GND)
+                           │                               (Schalter "AN" = GPIO4 auf GND)
                            │
                            └── C5 100 nF ── GND        (optional, Entprellung/Störschutz)
 ```
@@ -68,22 +68,6 @@ Verdrahtungs-Regeln:
 
 **Die Zahlen im Code sind GPIO-Nummern des Chips.** Auf SuperMini-Boards steht fast immer direkt die GPIO-Nummer an den Pins („4“, „IO4“, „GP4“). Es gibt aber Klone mit anderer Beschriftung oder Anordnung. **Zähle nie nach Position**, sondern lies die Beschriftung. Im Zweifel schick ein Foto von Vorder- und Rückseite.
 
-### ESP32-C3 SuperMini
-
-| Funktion | GPIO | Warum |
-|---|---|---|
-| Servo-Signal | **GPIO 4** | kein Strapping-Pin, frei |
-| Schalter | **GPIO 5** | kein Strapping-Pin |
-| Versorgung | **5V**-Pin (über D1), **G** | |
-
-Alternativen für Servo oder Schalter: GPIO 0, 1, 3, 6, 7, 10.
-**Meiden:**
-- GPIO 2, 8, 9: Strapping-Pins. 8 ist meist die blaue LED, 9 der BOOT-Taster. Falscher Pegel beim Start heißt: Board bootet nicht.
-- GPIO 18/19: USB D−/D+.
-- GPIO 20/21: UART RX/TX. Nutzbar, aber dort erscheinen Bootmeldungen, ein Servo würde beim Start zucken.
-- GPIO 11–17: interner Flash (nicht herausgeführt).
-- **3.3V-Pin nie mit der Batterie verbinden.** Eine frische 3×AA liefert 4,8 V, der Chip verträgt max. 3,6 V.
-
 ### ESP32-S3 SuperMini
 
 | Funktion | GPIO | Warum |
@@ -99,6 +83,7 @@ Alternativen: GPIO 1, 2, 6–13.
 - GPIO 26–32: Flash. GPIO 33–37: bei Varianten mit Octal-PSRAM (z. B. „N8R8“) belegt.
 - GPIO 43/44: UART0 (TX/RX).
 - GPIO 48: auf vielen S3 SuperMini die RGB-LED.
+- **3V3-Pin nie mit der Batterie verbinden.** Eine frische 3×AA liefert 4,8 V, der Chip verträgt max. 3,6 V.
 
 #### Geprüftes Board: ESP32-S3 SuperMini mit Chip „ESP32-S3 FH4R2“ und LiPo-Lader
 
@@ -108,7 +93,7 @@ Alternativen: GPIO 1, 2, 6–13.
 - GPIO 48 ist die RGB-LED (unten rechts).
 - ⚠️ Das Board hat einen **Lade-IC für LiPo-Akkus** (Pads **B+ / B−** auf der Rückseite, LED „BAT“). **Die AA-Batterien niemals an B+/B− anschließen!** Der Lader würde versuchen, die Alkalinezellen mit 4,2 V zu laden, und die können dann auslaufen oder heiß werden. Die Batterie kommt wie im Schaltplan über D1 an **5V**. Dass die BAT-LED ohne Akku flackert oder leuchtet, ist bei solchen Boards normal.
 
-Die Pins stellst du in [`config.h`](firmware/UselessMachine/config.h) um. Der Code wählt C3 oder S3 automatisch nach dem eingestellten Board.
+Die Pins stellst du in [`config.h`](firmware/UselessMachine/config.h) um.
 
 ---
 
@@ -136,7 +121,7 @@ Dazu kommt der **Innenwiderstand** von Alkalinezellen: ca. 0,15–0,3 Ω pro Zel
 
 ### Wie wird der ESP32 versorgt?
 
-Beide SuperMini-Boards haben einen **3,3-V-Spannungsregler (LDO, meist ME6211 o. ä., max. 6 V Eingang)** hinter dem **5V-Pin**. Die Batterie gehört an **5V**, **niemals an 3V3** und natürlich nie an einen GPIO.
+Das S3 SuperMini hat einen **3,3-V-Spannungsregler (LDO, meist ME6211 o. ä., max. 6 V Eingang)** hinter dem **5V-Pin**. Die Batterie gehört an **5V**, **niemals an 3V3** und natürlich nie an einen GPIO.
 
 - Der LDO braucht nur ~0,1–0,2 V mehr als 3,3 V. Mit Diode (≈0,25 V Verlust) läuft der ESP bis zu einer Batteriespannung von ca. 3,5 V stabil, darunter bis ~3,2 V meist noch. Das ist unkritisch, weil der Servo vorher schlapp macht.
 - **Warum Schottky (1N5819)?** Am ESP fließen nur ca. 40–100 mA. Dabei fallen an der 1N5819 etwa **0,25–0,35 V** ab. Silizium-Dioden verlieren **0,7–1 V** (1N4007, 1N4148, 1N5399, 1N5408; FR107/FR207 als schnelle Silizium-Dioden eher noch mehr). Mit halb leeren Batterien (3,8 V) blieben dann nur ~2,9 V für den ESP, und das führt zu Resets. Einbaurichtung: **Ring (Kathode) zum 5V-Pin des ESP**, die andere Seite an Batterie-Plus.
@@ -152,7 +137,7 @@ Der ESP gibt 3,3-V-Pulse aus. Praktisch alle Hobby-Servos erkennen das zuverläs
 
 Ein Kippschalter mit 3 Pins ist ein Umschalter (SPDT). Der **mittlere Pin (COM)** ist je nach Hebelstellung mit dem linken oder rechten Pin verbunden.
 
-- **Mittlerer Pin → GND**, **ein äußerer Pin → Schalter-GPIO** (S3: GPIO 4, C3: GPIO 5), der andere äußere Pin bleibt frei.
+- **Mittlerer Pin → GND**, **ein äußerer Pin → GPIO 4**, der andere äußere Pin bleibt frei.
 - Der Kontakt schließt auf der **gegenüberliegenden** Seite der Hebelstellung: Hebel nach links → COM mit dem **rechten** Pin verbunden.
 - Nimm den äußeren Pin, der verbunden ist, wenn der Hebel in der **„AN“-Stellung** steht (also der Stellung, aus der der Arm ihn zurückdrückt). Prüfen mit Multimeter (Durchgang) oder Befehl `s` im seriellen Monitor. Ist es falsch herum: einfach den anderen äußeren Pin nehmen.
 - **Wichtig:** Der Schalter muss **ON-ON** sein (2 Stellungen). Ein **ON-OFF-ON** mit Mittelstellung funktioniert nicht, weil der Arm den Hebel sonst nur in die Mitte drückt.
@@ -168,7 +153,6 @@ Die Box wird über den **Hauptschalter** ein- und ausgeschaltet. Einen Tiefschla
 | Zustand | Strom |
 |---|---|
 | ESP32-S3 wach, ohne WLAN | ~35–45 mA |
-| ESP32-C3 wach, ohne WLAN | ~20–25 mA |
 | Servo in Ruhe (ohne Pulse) | ~5–10 mA (typabhängig) |
 | Board-LEDs (Power/BAT, WS2812 aus) | ~1–5 mA |
 
@@ -298,17 +282,16 @@ Der Deckel ist passiv: Der Arm drückt ihn auf, das Eigengewicht schließt ihn w
 
 Boardpaket: **esp32 von Espressif** (Version 3.x empfohlen, 2.x wird ebenfalls unterstützt). Keine zusätzlichen Libraries nötig.
 
-| | ESP32-C3 SuperMini | ESP32-S3 SuperMini |
-|---|---|---|
-| Board | „ESP32C3 Dev Module“ (oder „Nologo ESP32C3 Super Mini“) | „ESP32S3 Dev Module“ |
-| USB CDC On Boot | **Enabled** (sonst keine Serial-Ausgabe) | **Enabled** |
-| Flash Size | 4 MB | laut Aufdruck (meist 4 MB) |
-| PSRAM | – | „QSPI PSRAM“ bei N4R2, sonst Disabled |
+| Einstellung | ESP32-S3 SuperMini (FH4R2) |
+|---|---|
+| Board | „ESP32S3 Dev Module“ |
+| USB CDC On Boot | **Enabled** (sonst keine Serial-Ausgabe) |
+| Flash Size | **4MB** |
+| PSRAM | „QSPI PSRAM“ (oder Disabled, wird nicht gebraucht) |
 
 Per CLI:
 ```bash
-arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/UselessMachine
-arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/UselessMachine
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=4M,PSRAM=enabled firmware/UselessMachine
 ```
 
 ---
@@ -345,8 +328,8 @@ Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 | Die Maschine hält den Schalter für schon aus | Schaltlogik andersherum → anderen äußeren Kontakt nehmen oder `SWITCH_ON_LEVEL` auf `HIGH` (dann Pull-down statt Pull-up). |
 | Schalter löst zufällig aus | Störungen durch Servokabel → R3 + C5, Leitungen verdrillen und getrennt verlegen. |
 | Upload klappt nicht, kein USB-Port sichtbar | **BOOT halten, RESET tippen (oder USB einstecken), BOOT loslassen**, dann flashen. |
-| Keine Serial-Ausgabe (C3/S3) | „USB CDC On Boot: Enabled“ vergessen. |
-| Board bootet nicht, wenn der Schalter angeschlossen ist | Schalter hängt an einem Strapping-Pin (C3: 2/8/9, S3: 0/3/45/46) → anderen GPIO nehmen. |
+| Keine Serial-Ausgabe | „USB CDC On Boot: Enabled“ vergessen. |
+| Board bootet nicht, wenn der Schalter angeschlossen ist | Schalter hängt an einem Strapping-Pin (GPIO 0/3/45/46) → anderen GPIO nehmen. |
 | Servo fährt „falschherum“ | Die Richtung ergibt sich aus der Kalibrierung. `x`, dann neu kalibrieren (Abschnitt 8). |
 | Nach dem Einschalten passiert gar nichts, Servo kraftlos | Noch keine Kalibrierung gespeichert → Abschnitt 8. |
 | Deckel bleibt offen stehen | Öffnungswinkel zu groß (≥ 90°) → Anschlag einbauen oder PUSH-Punkt/Armgeometrie ändern. |

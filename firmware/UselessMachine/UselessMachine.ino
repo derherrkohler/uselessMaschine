@@ -1,7 +1,7 @@
 /*
   =====================================================================
    Useless Machine mit Charakter
-   ESP32-C3 SuperMini / ESP32-S3 SuperMini – Arduino-Core 2.x oder 3.x
+   ESP32-S3 SuperMini – Arduino-Core 2.x oder 3.x
 
    Dateien:
      config.h    – Pins, Verhalten, optionale Kalibrier-Vorgaben

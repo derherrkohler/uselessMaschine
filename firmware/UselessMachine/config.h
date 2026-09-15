@@ -10,17 +10,13 @@
 //  Auf den SuperMini-Boards steht meist direkt die GPIO-Nummer auf der
 //  Platine ("4", "GP4", "IO4" ...). Siehe README für Alternativen.
 // ---------------------------------------------------------------------
-#if CONFIG_IDF_TARGET_ESP32C3
-  #define PIN_SERVO   4   // PWM zum Servo (über 330 Ω)
-  #define PIN_SWITCH  5   // Kippschalter
-#elif CONFIG_IDF_TARGET_ESP32S3
-  #define PIN_SERVO   5   // so verdrahtet: Servo-Signal an GPIO 5
-  #define PIN_SWITCH  4   // Schalter an GPIO 4
-  #define PIN_RGB_LED 48  // WS2812 auf dem S3 SuperMini – wird dauerhaft ausgeschaltet.
-                          // Zeile auskommentieren, falls dein Board dort keine LED hat.
-#else
-  #error "Dieses Projekt ist für ESP32-C3 oder ESP32-S3 ausgelegt. Pins in config.h ergänzen."
+#if !CONFIG_IDF_TARGET_ESP32S3
+  #error "Board auf \"ESP32S3 Dev Module\" stellen – dieses Projekt ist für den ESP32-S3 SuperMini."
 #endif
+
+#define PIN_SERVO   5   // Servo-Signal (orange) über 330 Ω
+#define PIN_SWITCH  4   // Kippschalter gegen GND
+#define PIN_RGB_LED 48  // WS2812 auf dem S3 SuperMini – wird dauerhaft ausgeschaltet
 
 // ---------------------------------------------------------------------
 //  SCHALTER
@@ -58,7 +54,7 @@
 #define SERVO_US_MIN          500    // harte Sicherheitsgrenzen
 #define SERVO_US_MAX         2500
 
-#define SERVO_PWM_BITS     14   // 14 Bit @ 50 Hz ≈ 1,2 µs Auflösung (C3 & S3 können max. 14)
+#define SERVO_PWM_BITS     14   // 14 Bit @ 50 Hz ≈ 1,2 µs Auflösung (S3 kann max. 14)
 #define SERVO_LEDC_CHANNEL  0   // nur für Arduino-Core 2.x relevant
 
 // Wie schnell der Servo physikalisch maximal ist, in "% des Hubs pro Sekunde".
