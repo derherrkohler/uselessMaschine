@@ -42,10 +42,12 @@
 //    100= PUSH  : Arm hat den Schalter sicher umgelegt
 //  HOME darf größer als PUSH sein (Servo andersherum eingebaut) – egal.
 // ---------------------------------------------------------------------
-#define SERVO_US_HOME    1000
-#define SERVO_US_LID     1250
-#define SERVO_US_TOUCH   1850
-#define SERVO_US_PUSH    2000
+// Startwerte für "Servo dreht zum Schalter hin mit kleiner werdenden µs".
+// Fährt der Arm falschherum: Werte spiegeln (neu = 3000 − alt).
+#define SERVO_US_HOME    2000
+#define SERVO_US_LID     1750
+#define SERVO_US_TOUCH   1150
+#define SERVO_US_PUSH    1000
 #define SERVO_US_MIN      500   // harte Sicherheitsgrenzen
 #define SERVO_US_MAX     2500
 
