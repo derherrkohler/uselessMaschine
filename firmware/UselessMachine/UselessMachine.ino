@@ -39,6 +39,7 @@ bool     blockedUntilOff = false;   // nach fehlgeschlagenem Klick: erst wieder,
 bool     calibration = false;       // Kalibriermodus: Schalter wird ignoriert
 bool     calibrated = false;        // gültige Kalibrierung vorhanden
 bool     pendingRetrigger = false;
+bool     firstRunPending = CALIBRATE_ON_FIRST_RUN;  // nächste echte Aktion = Kalibrierfahrt
 Calib    draft = {0, 0, 0, 0};      // Kalibrierung in Arbeit (0 = noch nicht gesetzt)
 
 // ---------------------------------------------------------------------
@@ -211,7 +212,17 @@ static Outcome perform(const Plan& p, bool test) {
   return failed ? Outcome::PushFailed : Outcome::Done;
 }
 
+static void firstRunCalibration();
+
 static void handleTrigger(bool test = false, int forcedPersona = -1) {
+  if (firstRunPending && !test) {
+    firstRunPending = false;
+    totalRuns++;
+    firstRunCalibration();
+    lastRunEnd = millis();
+    haveLastRun = true;
+    return;
+  }
   bool retrig = pendingRetrigger;
   pendingRetrigger = false;
   do {
@@ -367,6 +378,91 @@ static void printCalib(const char* title, const Calib& c) {
   Serial.printf("%s  HOME %u | DECKEL %u | TOUCH %u | PUSH %u µs", title, c.home, c.lid, c.touch, c.push);
   if (c.home && c.push) Serial.printf("  (PUSH ≈ %.0f° ab HOME)", fabs((float)c.push - c.home) / SERVO_US_PER_DEG);
   Serial.println();
+}
+
+// ---------------------------------------------------------------------
+//  Kalibrierfahrt (erste Aktion nach dem Einschalten)
+// ---------------------------------------------------------------------
+// µs -> Position 0..100 % (Umkehrung von Motion::posToUs, >100 % hinter PUSH)
+static float usToPos(float us) {
+  const float h = calib.home, l = calib.lid, t = calib.touch, p = calib.push;
+  const float dir = p > h ? 1.0f : -1.0f;
+  const float d = (us - h) * dir;  // Abstand ab HOME Richtung Schalter
+  if (d <= (l - h) * dir) return P_LID * (us - h) / (l - h);
+  if (d <= (t - h) * dir) return P_LID + (P_TOUCH - P_LID) * (us - l) / (t - l);
+  return P_TOUCH + (100.0f - P_TOUCH) * (us - t) / (p - t);
+}
+
+static void firstRunCalibration() {
+  const float dir = calib.push > calib.home ? 1.0f : -1.0f;
+  const float perDeg = SERVO_US_PER_DEG;
+  const float servoUsPerS = SERVO_MAX_SPEED_PCT_S / 100.0f * fabs((float)calib.push - (float)calib.home);
+  float start = calib.touch - dir * FIRST_RUN_SWEEP_START_DEG * perDeg;
+  if ((start - calib.lid) * dir < 0.0f) start = calib.lid;
+  const float limit =
+      constrain(calib.push + dir * FIRST_RUN_SWEEP_EXTRA_DEG * perDeg, (float)SERVO_US_MIN, (float)SERVO_US_MAX);
+  const uint32_t t0 = millis();
+  Serial.printf("[#%lu] Kalibrierfahrt: Schaltpunkt wird neu gemessen\n", (unsigned long)totalRuns);
+
+  M.servo.attach();
+  M.mood = MOODS[mNormal];
+  M.setGuard(Guard::None);
+  M.setDeadline(0);
+  M.timeScale = 1.0f;
+  M.pushFailed = false;
+  M.pushed = false;
+  M.testMode = false;
+
+  // 1) zügig bis kurz vor den Hebel
+  const float from = M.servo.us();
+  M.servo.writeUs(start);
+  M.pos = usToPos(start);
+  M.lastMotion = millis();
+  M.waitMs((uint32_t)(fabs(start - from) / servoUsPerS * 1000.0f) + 80);
+
+  // 2) langsam weiter, bis der Schalter umfällt
+  float flipUs = 0;
+  const float durMs = fabs(limit - start) / FIRST_RUN_SWEEP_US_PER_S * 1000.0f;
+  const uint32_t s0 = millis();
+  for (;;) {
+    float t = durMs > 0.0f ? (millis() - s0) / durMs : 1.0f;
+    if (t > 1.0f) t = 1.0f;
+    float us = start + (limit - start) * t;
+    M.servo.writeUs(us);
+    M.sw.update();
+    if (!M.sw.isOn()) { flipUs = us; break; }
+    if (t >= 1.0f) break;
+    delay(10);
+  }
+  M.lastMotion = millis();
+
+  if (flipUs > 0.0f) {
+    Calib c = calib;
+    c.push = (uint16_t)(flipUs + dir * AUTO_PUSH_EXTRA_DEG * perDeg);
+    c.touch = (uint16_t)(flipUs - dir * AUTO_TOUCH_BEFORE_DEG * perDeg);
+    if ((c.touch - (float)c.lid) * dir <= 0.0f) c.touch = (uint16_t)((c.lid + flipUs) / 2.0f);
+    Serial.printf("  Schalter fiel bei %.0f µs\n", flipUs);
+    if (calibValid(c)) {
+      calib = c;
+      printCalib("  Aktiv:", calib);
+    } else {
+      Serial.println(F("  Messwert unplausibel – gespeicherte Werte bleiben"));
+    }
+    M.pos = usToPos(flipUs);
+    M.servo.writeUs(Motion::posToUs(M.pos));
+    M.pushed = true;
+  } else {
+    Serial.println(F("  Schalter nicht erreicht – normaler Klick mit gespeicherten Werten"));
+    M.pos = usToPos(M.servo.us());
+    M.push(1e6f, E_LIN);
+  }
+
+  bool failed = M.pushFailed;
+  if (failed) blockedUntilOff = true;
+  if (!timedScript(ZURUECK[zCalm], failed ? Guard::None : Guard::AbortIfOn, RETURN_MAX_MS)) pendingRetrigger = true;
+  M.setGuard(Guard::None);
+  Serial.printf("  Dauer %lu ms | Ende: pos %.0f %% = %.0f µs\n", (unsigned long)(millis() - t0), M.pos,
+                M.servo.us());
 }
 
 // ---------------------------------------------------------------------

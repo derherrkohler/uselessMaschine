@@ -59,6 +59,14 @@
 #define AUTO_TOUCH_BEFORE_DEG 8       // TOUCH = Umschaltpunkt − 8°
 #define AUTO_LID_FRACTION     0.3f    // DECKEL ohne Enter: 30 % des Wegs HOME→TOUCH
 #define HOME_BACKOFF_US       25      // HOME etwas vom Anschlag weg (≈ 2–3°), gegen Brummen
+
+// Kalibrierfahrt: Die erste Aktion nach dem Einschalten misst den Schaltpunkt neu
+// (passt sich an Batteriestand und Mechanik an). PUSH/TOUCH gelten bis zum Ausschalten,
+// HOME und DECKEL kommen aus der gespeicherten Kalibrierung.
+#define CALIBRATE_ON_FIRST_RUN      true
+#define FIRST_RUN_SWEEP_START_DEG   15      // zügig bis so weit vor TOUCH, ab da langsam
+#define FIRST_RUN_SWEEP_EXTRA_DEG   30      // so weit hinter dem alten PUSH wird maximal gesucht
+#define FIRST_RUN_SWEEP_US_PER_S    200.0f  // Suchtempo (≈ 19°/s)
 #define SERVO_US_MIN          500    // harte Sicherheitsgrenzen
 #define SERVO_US_MAX         2500
 

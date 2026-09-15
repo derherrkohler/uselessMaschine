@@ -323,6 +323,17 @@ Einzelne Punkte korrigieren: hinfahren (z. B. `t`), mit `+` / `-` (10 µs ≈ 1�
 
 Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
 
+### Kalibrierfahrt nach dem Einschalten
+
+Die **erste Aktion nach dem Einschalten** ist eine Kalibrierfahrt, keine Persönlichkeit:
+
+1. Der Arm fährt zügig bis kurz vor den gespeicherten TOUCH-Punkt (15°).
+2. Dann fährt er langsam weiter, bis der Schalter umfällt.
+3. Aus diesem Schaltpunkt werden **PUSH** (+4°) und **TOUCH** (−8°) neu gesetzt. Sie gelten bis zum Ausschalten. So passt sich die Maschine an Batteriestand und Mechanik an.
+4. Danach fährt er in höchstens 1 s zurück.
+
+HOME und DECKEL kommen weiter aus der gespeicherten Kalibrierung. Wird der Schalter nicht erreicht (bis 30° hinter dem alten PUSH), folgt ein normaler Klick mit den gespeicherten Werten. Ausschalten: `CALIBRATE_ON_FIRST_RUN false` in `config.h`.
+
 ### Länge der Vorstellungen
 
 Zwei globale Regler wirken auf alle Gesten, der Charakter bleibt dabei erhalten. Beide werden sofort im ESP gespeichert:
