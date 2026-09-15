@@ -51,6 +51,14 @@
 #define SERVO_US_MID         1500    // ≈ 90°: erster Puls beim Kalibrieren ('m')
 #define SERVO_US_PER_DEG     10.5f   // SG90 ≈ 1900 µs / 180° – nur für die Gradanzeige
 #define JOG_US_PER_S         250.0f  // Tempo beim Kalibrieren (≈ 24°/s)
+
+// Auto-Kalibrierung ('a'): Arm fährt von HOME langsam los, bis der Schalter umfällt
+#define AUTO_US_PER_S         120.0f  // Suchtempo (≈ 11°/s)
+#define AUTO_MAX_DEG          150     // so weit wird maximal gesucht
+#define AUTO_PUSH_EXTRA_DEG   4       // PUSH  = Umschaltpunkt + 4°
+#define AUTO_TOUCH_BEFORE_DEG 8       // TOUCH = Umschaltpunkt − 8°
+#define AUTO_LID_FRACTION     0.3f    // DECKEL ohne Enter: 30 % des Wegs HOME→TOUCH
+#define HOME_BACKOFF_US       25      // HOME etwas vom Anschlag weg (≈ 2–3°), gegen Brummen
 #define SERVO_US_MIN          500    // harte Sicherheitsgrenzen
 #define SERVO_US_MAX         2500
 

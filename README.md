@@ -302,16 +302,26 @@ Die Kalibrierung funktioniert mit **fertig montiertem Arm** und wird **im ESP ge
 
 Solange nichts gespeichert ist, sendet der ESP **keine Pulse** an den Servo: Der Arm bleibt liegen, der Schalter wird ignoriert.
 
+### Automatisch (empfohlen)
+
 1. **Hauptschalter aus**, USB anschließen (ESP und Servo laufen dann aus USB), flashen, seriellen Monitor öffnen (115200 Baud, Zeilenende „Neue Zeile“).
-2. `m` → der Arm fährt auf die **Mitte (1500 µs ≈ 90°)**, also etwa zum Schalter. Das ist der einzige Sprung, egal an welchem Ende er vorher lag. Danach fährt alles langsam.
-3. Mit `+50` oder `-50` herausfinden, in welcher Richtung die Box liegt. Dann mit `+` / `-` (10 µs ≈ 1°) bis an den **Anschlag in der Box**. Sobald er anliegt, **2–3 Schritte zurück**, sonst drückt der Servo dauernd dagegen und brummt → `H`.
-4. Richtung Schalter, bis der Arm den **Deckel von innen gerade berührt** → `D`.
-5. Weiter, bis der Arm den **Schalterhebel gerade berührt** (noch nicht umlegt) → `T`.
-6. Weiter, bis der Schalter **sicher umkippt**, plus 1–2 Schritte → `P`. `s` zeigt die Winkel ab HOME, der Schalter sollte bei ca. 90° liegen.
-7. `w` → speichern. Die Firmware prüft, dass die vier Punkte in einer Richtung liegen, und fährt langsam nach HOME.
-8. Mit `h`, `d`, `t`, `p` prüfen. Einzelne Punkte korrigieren: hinfahren (`t`, dann `+`/`-`), neu merken (`T`), wieder `w`.
-9. `s` zeigt, ob der Schalter als AN/aus erkannt wird. Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
-10. `c` → Kalibriermodus aus. USB abziehen, Hauptschalter an → Betrieb.
+2. **Kippschalter AUS**, dann `m` → der Arm fährt auf die **Mitte (1500 µs ≈ 90°)**. Das ist der einzige Sprung, egal an welchem Ende er vorher lag. Danach fährt alles langsam.
+3. `<` oder `>` → der Arm fährt langsam Richtung eines Endes. **Enter stoppt.** Fährt er vom Kasten weg: Enter, dann die andere Richtung. Am **Anschlag in der Box** Enter → `H`. Den kleinen Abstand zum Anschlag (gegen Brummen) rechnet die Firmware selbst dazu.
+4. **Kippschalter von Hand AN**, dann `a` → der Arm fährt langsam von HOME Richtung Schalter.
+   - Drück **Enter in dem Moment, in dem der Arm den Deckel berührt**. Das ist optional, ohne Enter wird der Deckelpunkt geschätzt.
+   - Sobald der Schalter umfällt, stoppt der Arm. Die Firmware berechnet **PUSH** (Schaltpunkt + 4°) und **TOUCH** (Schaltpunkt − 8°), **speichert** und fährt zurück nach HOME.
+5. Mit `h`, `d`, `t`, `p` prüfen. Für `p` den Schalter vorher wieder AN stellen.
+6. `c` → Kalibriermodus aus. USB abziehen, Hauptschalter an → Betrieb.
+
+### Von Hand (Feinjustage)
+
+Einzelne Punkte korrigieren: hinfahren (z. B. `t`), mit `+` / `-` (10 µs ≈ 1°) nachstellen, neu merken (`H`, `D`, `T` oder `P`), dann `w` zum Speichern. `s` zeigt alle Werte und die Winkel ab HOME.
+
+- **TOUCH** muss den Hebel berühren, darf ihn aber **nicht umlegen**. Sonst stören Gesten wie „antippen und zurückzucken“.
+- **DECKEL** ist die erste Berührung des Deckels von innen.
+- **PUSH** ist der Punkt, an dem der Schalter sicher umkippt, plus 1–2 Schritte.
+
+Mit `l` die Liste ansehen, mit `n0` … `n52` oder `r` einzelne Persönlichkeiten testen.
 
 Neu anfangen: `x` löscht die gespeicherte Kalibrierung.
 

@@ -274,22 +274,35 @@ static void clearCalib() {
   }
 }
 
+static void flushSerialInput() {
+  delay(30);  // restliches "\r\n" der letzten Eingabe abwarten
+  while (Serial.available()) Serial.read();
+}
+
 // Servo langsam auf einen µs-Wert fahren. Beim allerersten Attach springt der
 // Servo auf die zuletzt gesetzte Sollposition (ohne Kalibrierung: Mitte).
-static void rampUs(float target) {
+// stopOnKey: Enter (oder jede Eingabe) hält sofort an -> Rückgabe false.
+static bool rampUs(float target, float usPerS = JOG_US_PER_S, bool stopOnKey = false) {
   target = constrain(target, (float)SERVO_US_MIN, (float)SERVO_US_MAX);
   M.servo.attach();
+  if (stopOnKey) flushSerialInput();
   float from = M.servo.us();
-  float durMs = fabs(target - from) / JOG_US_PER_S * 1000.0f;
+  float durMs = fabs(target - from) / usPerS * 1000.0f;
   uint32_t t0 = millis();
   for (;;) {
     float t = durMs > 0 ? (millis() - t0) / durMs : 1.0f;
     if (t > 1.0f) t = 1.0f;
     M.servo.writeUs(from + (target - from) * t);
     if (t >= 1.0f) break;
+    if (stopOnKey && Serial.available()) {
+      flushSerialInput();
+      M.lastMotion = millis();
+      return false;
+    }
     delay(15);
   }
   M.lastMotion = millis();
+  return true;
 }
 
 static float degFromHome(float us) {
@@ -315,7 +328,10 @@ static void printCalib(const char* title, const Calib& c) {
 static void printHelp() {
   Serial.println(F(
       "\nKalibrieren (Arm bleibt montiert, alles fährt langsam):\n"
-      "  m        auf die Mitte (1500 µs ≈ 90°) – immer der erste Schritt\n"
+      "  m        auf die Mitte (1500 µs ≈ 90°) – immer der erste Schritt, Schalter AUS\n"
+      "  < / >    langsam Richtung Ende fahren, Enter = Stopp\n"
+      "  a        Auto: Schalter AN, Arm fährt von HOME los und misst den Schaltpunkt\n"
+      "           (Enter unterwegs = hier berührt der Arm den Deckel)\n"
       "  + / -    10 µs (≈ 1°) weiter, z. B. +50 / -50\n"
       "  u1500    langsam auf 1500 µs\n"
       "  H D T P  aktuelle Stellung als HOME / DECKEL / TOUCH / PUSH merken\n"
@@ -356,12 +372,103 @@ static void setDraft(char which) {
   printCalib("Entwurf:", draft);
 }
 
+// Auto-Kalibrierung: von HOME langsam Richtung Schalter, bis er umfällt.
+static void autoCalibrate() {
+  if (!draft.home) {
+    Serial.println(F("Erst HOME setzen: m, dann < oder > bis zum Anschlag, dann H."));
+    return;
+  }
+  M.sw.update();
+  if (!M.sw.isOn()) {
+    Serial.println(F("Schalter erst von Hand AN stellen, dann a."));
+    return;
+  }
+  calibration = true;
+  const int dir = draft.home < SERVO_US_MID ? 1 : -1;  // von HOME weg Richtung Mitte
+  const float perDeg = SERVO_US_PER_DEG;
+
+  Serial.println(F("Auto: zurück nach HOME ..."));
+  rampUs(draft.home);
+  delay(300);
+  Serial.println(F("Auto: fahre langsam zum Schalter. Enter = Arm berührt jetzt den Deckel. "
+                   "Andere Eingabe = Abbruch."));
+  flushSerialInput();
+
+  const float from = draft.home;
+  const float limit = constrain(from + dir * AUTO_MAX_DEG * perDeg, (float)SERVO_US_MIN, (float)SERVO_US_MAX);
+  const float durMs = fabs(limit - from) / AUTO_US_PER_S * 1000.0f;
+  float lidUs = 0, flipUs = 0;
+  uint8_t typed = 0;
+  bool aborted = false;
+  uint32_t t0 = millis();
+  for (;;) {
+    float t = (millis() - t0) / durMs;
+    if (t > 1.0f) t = 1.0f;
+    float us = from + (limit - from) * t;
+    M.servo.writeUs(us);
+    M.sw.update();
+    if (!M.sw.isOn()) { flipUs = us; break; }
+    while (Serial.available()) {
+      char c = Serial.read();
+      if (c != '\r' && c != '\n') { typed++; continue; }
+      if (typed) { aborted = true; break; }
+      if (!lidUs) {
+        lidUs = us;
+        Serial.printf("  Deckel bei %.0f µs (≈ %.0f°)\n", us, fabs(us - from) / perDeg);
+      }
+    }
+    if (aborted || t >= 1.0f) break;
+    delay(10);
+  }
+  M.lastMotion = millis();
+
+  if (aborted || !flipUs) {
+    Serial.println(aborted ? F("Abgebrochen.")
+                           : F("Schalter wurde nicht umgelegt (Suchbereich zu Ende). Richtung/HOME prüfen."));
+    rampUs(draft.home);
+    return;
+  }
+  Serial.printf("  Schalter fiel bei %.0f µs (≈ %.0f° ab HOME)\n", flipUs, fabs(flipUs - from) / perDeg);
+
+  Calib c;
+  c.home = (uint16_t)(from + dir * HOME_BACKOFF_US);
+  c.push = (uint16_t)(flipUs + dir * AUTO_PUSH_EXTRA_DEG * perDeg);
+  c.touch = (uint16_t)(flipUs - dir * AUTO_TOUCH_BEFORE_DEG * perDeg);
+  c.lid = lidUs ? (uint16_t)lidUs : (uint16_t)(c.home + (c.touch - (float)c.home) * AUTO_LID_FRACTION);
+
+  rampUs(c.home);
+  draft = c;
+  printCalib("Gemessen:", draft);
+  if (!calibValid(draft, true)) {
+    Serial.println(F("Nicht gespeichert – einzelne Punkte von Hand setzen (H D T P), dann w."));
+    return;
+  }
+  if (!saveCalib(draft)) {
+    Serial.println(F("Speichern fehlgeschlagen!"));
+    return;
+  }
+  calib = draft;
+  calibrated = true;
+  M.pos = 0;
+  Serial.println(F("Gespeichert. Mit h d t p prüfen (Schalter vorher wieder AN für p), dann c."));
+}
+
 static void runCommand(char* cmd) {
   int arg = atoi(cmd + 1);
   switch (cmd[0]) {
     case '?': printHelp(); break;
 
     // --- Kalibrieren ---
+    case '<':
+    case '>':
+      calibration = true;
+      Serial.println(F("Fahre langsam ... Enter = Stopp"));
+      rampUs(cmd[0] == '<' ? SERVO_US_MIN : SERVO_US_MAX, JOG_US_PER_S, true);
+      printUs();
+      break;
+    case 'a':
+      autoCalibrate();
+      break;
     case 'm':
       calibration = true;
       Serial.println(F("Mitte (≈ 90°) ..."));
