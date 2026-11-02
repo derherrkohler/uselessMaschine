@@ -255,6 +255,11 @@ Neue Gesten prüfen (Opcodes, Argumente, LOOP/NEXT-Paare, Größe):
 python3 tools/validate_scripts.py
 ```
 
+Logik der Firmware auf dem Rechner testen (simulierte Zeit und Hardware, mit ASan/UBSan, ohne Board):
+```bash
+test/run_host_tests.sh
+```
+
 ---
 
 ## 6b. Der Deckel
@@ -329,6 +334,8 @@ Die **erste Aktion nach dem Einschalten** ist eine Kalibrierfahrt, keine normale
 2. Dann fährt er langsam weiter, bis der Schalter umfällt.
 3. Aus diesem Schaltpunkt werden **PUSH** (+4°) und **TOUCH** (−8°) neu gesetzt. Sie gelten bis zum Ausschalten. So passt sich die Maschine an Batteriestand und Mechanik an.
 4. Danach fährt er in höchstens 1 s zurück.
+
+Beide Fahrten halten `SPEED_LIMIT_PCT_S` ein. Schaltet man den Schalter von Hand aus, bevor die langsame Messstrecke beginnt, fährt der Arm zurück, die gespeicherten Werte bleiben, und die nächste Aktion misst neu.
 
 HOME und DECKEL kommen weiter aus der gespeicherten Kalibrierung. Wird der Schalter nicht erreicht (bis 30° hinter dem alten PUSH), folgt ein normaler Klick mit den gespeicherten Werten. Ausschalten: `CALIBRATE_ON_FIRST_RUN false` in `config.h`.
 

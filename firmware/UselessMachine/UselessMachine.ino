@@ -17,6 +17,7 @@
 #include "config.h"
 #include "bytecode.h"
 #include "motion.h"
+#include "calibration.h"
 #include "scripts.h"
 
 #include <esp_system.h>
@@ -96,7 +97,7 @@ static bool timedScript(const uint8_t* script, Guard guard, uint32_t maxMs) {
   M.setDeadline(start + scriptMs);
   bool ok = M.run(script);
   bool aborted = !ok && !M.timedOut;
-  M.setDeadline(0);
+  M.clearDeadline();
   M.timeScale = 1.0f;
   if (aborted) return false;
   return M.moveTo(0, 1e6f, E_LIN);
@@ -119,7 +120,7 @@ static Outcome perform(const Action& a, bool test) {
   M.setDeadline(t0 + PRE_BUDGET_MS);
   bool preOk = M.run(a.approach);
   bool userUndid = !preOk && !M.timedOut;
-  M.setDeadline(0);
+  M.clearDeadline();
   if (userUndid) {
     Serial.println(F("  -> Nanu? Schalter ist schon aus."));
     return timedScript(G_UNDO, Guard::AbortIfOn, RETURN_MAX_MS) ? Outcome::UserUndid : Outcome::Retrigger;
@@ -131,7 +132,7 @@ static Outcome perform(const Action& a, bool test) {
   M.fitToBudget(klick, 1, KLICK_BUDGET_MS);
   M.setDeadline(t0 + PRE_BUDGET_MS + KLICK_BUDGET_MS);
   M.run(a.klick);
-  M.setDeadline(0);
+  M.clearDeadline();
   M.timeScale = 1.0f;
   if (!M.pushed) M.push(1e6f, E_LIN);  // Zeit war um, bevor gedrückt wurde
   bool failed = M.pushFailed;
@@ -201,30 +202,7 @@ static void rgbLedOff() {
 // ---------------------------------------------------------------------
 //  Kalibrierung: prüfen, laden, speichern
 // ---------------------------------------------------------------------
-static bool calibValid(const Calib& c, bool verbose = false) {
-  const uint16_t v[4] = {c.home, c.lid, c.touch, c.push};
-  const char* names[4] = {"HOME (H)", "DECKEL (D)", "TOUCH (T)", "PUSH (P)"};
-  bool ok = true;
-  for (int i = 0; i < 4; i++) {
-    if (v[i] < SERVO_US_MIN || v[i] > SERVO_US_MAX) {
-      if (verbose) Serial.printf("  %s fehlt oder ungültig\n", names[i]);
-      ok = false;
-    }
-  }
-  if (!ok) return false;
-  bool up = c.push > c.home;
-  for (int i = 1; i < 4; i++) {
-    if (up ? v[i] <= v[i - 1] : v[i] >= v[i - 1]) {
-      if (verbose) Serial.println(F("  Reihenfolge stimmt nicht: HOME -> DECKEL -> TOUCH -> PUSH müssen in eine Richtung laufen"));
-      return false;
-    }
-  }
-  if (abs((int)c.push - (int)c.home) < 200) {
-    if (verbose) Serial.println(F("  HOME und PUSH liegen zu nah beieinander"));
-    return false;
-  }
-  return true;
-}
+// calibValid() steht in calibration.h
 
 static bool loadCalib() {
   Preferences prefs;
@@ -321,73 +299,31 @@ static void printCalib(const char* title, const Calib& c) {
 // ---------------------------------------------------------------------
 //  Kalibrierfahrt (erste Aktion nach dem Einschalten)
 // ---------------------------------------------------------------------
-// µs -> Position 0..100 % (Umkehrung von Motion::posToUs, >100 % hinter PUSH)
-static float usToPos(float us) {
-  const float h = calib.home, l = calib.lid, t = calib.touch, p = calib.push;
-  const float dir = p > h ? 1.0f : -1.0f;
-  const float d = (us - h) * dir;  // Abstand ab HOME Richtung Schalter
-  if (d <= (l - h) * dir) return P_LID * (us - h) / (l - h);
-  if (d <= (t - h) * dir) return P_LID + (P_TOUCH - P_LID) * (us - l) / (t - l);
-  return P_TOUCH + (100.0f - P_TOUCH) * (us - t) / (p - t);
-}
-
+// usToPos() und die Messfahrt stehen in calibration.h
 static void firstRunCalibration() {
-  const float dir = calib.push > calib.home ? 1.0f : -1.0f;
-  const float perDeg = SERVO_US_PER_DEG;
-  const float servoUsPerS = SERVO_MAX_SPEED_PCT_S / 100.0f * fabs((float)calib.push - (float)calib.home);
-  float start = calib.touch - dir * FIRST_RUN_SWEEP_START_DEG * perDeg;
-  if ((start - calib.lid) * dir < 0.0f) start = calib.lid;
-  const float limit =
-      constrain(calib.push + dir * FIRST_RUN_SWEEP_EXTRA_DEG * perDeg, (float)SERVO_US_MIN, (float)SERVO_US_MAX);
   const uint32_t t0 = millis();
   Serial.printf("[#%lu] Kalibrierfahrt: Schaltpunkt wird neu gemessen\n", (unsigned long)totalRuns);
 
   M.servo.attach();
   M.mood = MOODS[mNormal];
   M.setGuard(Guard::None);
-  M.setDeadline(0);
+  M.clearDeadline();
   M.timeScale = 1.0f;
   M.pushFailed = false;
   M.pushed = false;
   M.testMode = false;
 
-  // 1) zügig bis kurz vor den Hebel
-  const float from = M.servo.us();
-  M.servo.writeUs(start);
-  M.pos = usToPos(start);
-  M.lastMotion = millis();
-  M.waitMs((uint32_t)(fabs(start - from) / servoUsPerS * 1000.0f) + 80);
-
-  // 2) langsam weiter, bis der Schalter umfällt
   float flipUs = 0;
-  const float durMs = fabs(limit - start) / FIRST_RUN_SWEEP_US_PER_S * 1000.0f;
-  const uint32_t s0 = millis();
-  for (;;) {
-    float t = durMs > 0.0f ? (millis() - s0) / durMs : 1.0f;
-    if (t > 1.0f) t = 1.0f;
-    float us = start + (limit - start) * t;
-    M.servo.writeUs(us);
-    M.sw.update();
-    if (!M.sw.isOn()) { flipUs = us; break; }
-    if (t >= 1.0f) break;
-    delay(10);
+  SweepResult r = measureSwitchPoint(M, flipUs);
+  if (r == SweepResult::SwitchOff) {
+    // von Hand ausgeschaltet, bevor gemessen wurde: Werte behalten, nächstes Mal neu messen
+    Serial.println(F("  -> Nanu? Schalter ist schon aus. Kalibrierung bleibt, nächste Aktion misst neu."));
+    firstRunPending = true;
+    if (!timedScript(G_UNDO, Guard::AbortIfOn, RETURN_MAX_MS)) pendingRetrigger = true;
+    M.setGuard(Guard::None);
+    return;
   }
-  M.lastMotion = millis();
-
-  if (flipUs > 0.0f) {
-    Calib c = calib;
-    c.push = (uint16_t)(flipUs + dir * AUTO_PUSH_EXTRA_DEG * perDeg);
-    c.touch = (uint16_t)(flipUs - dir * AUTO_TOUCH_BEFORE_DEG * perDeg);
-    if ((c.touch - (float)c.lid) * dir <= 0.0f) c.touch = (uint16_t)((c.lid + flipUs) / 2.0f);
-    Serial.printf("  Schalter fiel bei %.0f µs\n", flipUs);
-    if (calibValid(c)) {
-      calib = c;
-      printCalib("  Aktiv:", calib);
-    } else {
-      Serial.println(F("  Messwert unplausibel – gespeicherte Werte bleiben"));
-    }
-    M.pos = usToPos(flipUs);
-    M.servo.writeUs(Motion::posToUs(M.pos));
+  if (r == SweepResult::Flipped) {
     M.pushed = true;
   } else {
     Serial.println(F("  Schalter nicht erreicht – normaler Klick mit gespeicherten Werten"));

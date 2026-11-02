@@ -84,7 +84,9 @@
 
 // Notbremse gegen Brownouts: >0 begrenzt ALLE Bewegungen auf diese Geschwindigkeit
 // (keine Vollgas-Sprünge mehr). Z. B. 200.0f, wenn der ESP beim Anfahren resettet.
+#ifndef SPEED_LIMIT_PCT_S  // für Host-Tests von außen setzbar
 #define SPEED_LIMIT_PCT_S       0.0f
+#endif
 
 #define MOTION_STEP_MS          15    // Interpolations-Takt
 #define SERVO_DETACH_IDLE_MS   1500   // PWM abschalten, wenn Arm ruht (kein Brummen, weniger Strom)

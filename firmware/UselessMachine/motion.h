@@ -4,6 +4,7 @@
 // =====================================================================
 #include "config.h"
 #include "bytecode.h"
+#include "timing.h"
 
 // ---------------------------------------------------------------------
 //  Entprellter Schalter
@@ -27,6 +28,7 @@ class DebouncedSwitch {
     }
   }
   bool isOn() const { return stable_; }
+  bool rawOn() const { return lastRaw_; }  // letzter ungefilterter Wert (nach update())
 
  private:
   bool raw() const { return digitalRead(PIN_SWITCH) == SWITCH_ON_LEVEL; }
@@ -114,7 +116,8 @@ class Motion {
   uint16_t tempoPct = GLOBAL_TEMPO_PCT;  // globaler Tempo-Faktor
   uint16_t pausePct = GLOBAL_PAUSE_PCT;  // globaler Pausen-Faktor
   float timeScale = 1.0f;     // Zeitbudget: <1 = Pausen kürzer, Bewegungen schneller
-  uint32_t deadline = 0;      // 0 = keine Zeitgrenze, sonst millis()-Zeitpunkt
+  uint32_t deadline = 0;      // millis()-Zeitpunkt der Zeitgrenze (nur gültig mit hasDeadline)
+  bool hasDeadline = false;   // Zeitgrenze aktiv
   bool timedOut = false;      // letzter Abbruch kam vom Zeitbudget
   bool pushed = false;        // in dieser Vorstellung wurde schon gedrückt
 
@@ -144,7 +147,7 @@ class Motion {
       sw.update();
       if (guard_ == Guard::AbortIfOff && !sw.isOn()) return false;
       if (guard_ == Guard::AbortIfOn && sw.isOn()) return false;
-      if (deadline && millis() >= deadline) { timedOut = true; return false; }
+      if (hasDeadline && timeReached(millis(), deadline)) { timedOut = true; return false; }
       uint32_t el = millis() - start;
       if (el >= ms) return true;
       uint32_t rest = ms - el;
@@ -236,16 +239,15 @@ class Motion {
   // drückt proportional zur Abweichung, also kräftiger. Weitere Versuche mit Anlauf.
   bool push(float v, uint8_t ease) {
     pushed = true;
-    const uint32_t saved = deadline;
-    if (saved) {
+    const bool savedHas = hasDeadline;
+    if (savedHas) {
       // Reicht die Restzeit nicht für einen langsamen Klick: mit Vollgas drücken
-      const uint32_t now = millis();
       const float needMs = fabs(100.0f - pos) / (v > 0.0f ? v : 1.0f) * 1000.0f * peakFactor(ease);
-      if (now >= saved || needMs > (float)(saved - now)) v = 1e6f;
+      if (needMs > (float)timeLeft(millis(), deadline)) v = 1e6f;
     }
-    deadline = 0;  // ein begonnener Klick wird nie vom Zeitbudget abgebrochen
+    hasDeadline = false;  // ein begonnener Klick wird nie vom Zeitbudget abgebrochen
     bool r = pushInner(v, ease);
-    deadline = saved;
+    hasDeadline = savedHas;
     return r;
   }
 
@@ -368,10 +370,16 @@ class Motion {
   // ------------------------------------------------------------------
   //  Zeitbudget: Dauer schätzen und Skripte passend straffen
   // ------------------------------------------------------------------
-  void setDeadline(uint32_t atMs) {
+  void setDeadline(uint32_t atMs) {  // jeder Wert gilt, auch 0 (Überlauf)
     deadline = atMs;
+    hasDeadline = true;
     timedOut = false;
   }
+  void clearDeadline() {
+    hasDeadline = false;
+    timedOut = false;
+  }
+  bool deadlineActive() const { return hasDeadline; }
 
   // timeScale so wählen, dass die Skripte (nacheinander, ab aktueller Position)
   // voraussichtlich in budgetMs passen.
